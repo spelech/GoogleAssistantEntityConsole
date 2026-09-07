@@ -546,15 +546,19 @@ class BlocklistView(HomeAssistantView):
         hass = request.app["hass"]
         try:
             body = await request.json()
+            if not isinstance(body, dict):
+                return self.json({"error": "Blocklist must be a list"}, status_code=400)
             blocklist = body.get("blocklist")
             if not isinstance(blocklist, list):
                 return self.json({"error": "Blocklist must be a list"}, status_code=400)
             
             # Syntax validation for regexes
             for pattern in blocklist:
+                if not isinstance(pattern, str):
+                    return self.json({"error": f"Invalid regex pattern '{pattern}': pattern must be a string"}, status_code=400)
                 try:
                     re.compile(pattern)
-                except re.error as err:
+                except (re.error, TypeError) as err:
                     return self.json({"error": f"Invalid regex pattern '{pattern}': {err}"}, status_code=400)
 
             save_blocklist(hass, blocklist)
@@ -572,13 +576,15 @@ class BlocklistAddView(HomeAssistantView):
         hass = request.app["hass"]
         try:
             body = await request.json()
+            if not isinstance(body, dict):
+                return self.json({"error": "Missing pattern"}, status_code=400)
             pattern = body.get("pattern")
-            if not pattern:
+            if not pattern or not isinstance(pattern, str):
                 return self.json({"error": "Missing pattern"}, status_code=400)
 
             try:
                 re.compile(pattern)
-            except re.error as err:
+            except (re.error, TypeError) as err:
                 return self.json({"error": f"Invalid regex pattern: {err}"}, status_code=400)
 
             blocklist = load_blocklist(hass)
