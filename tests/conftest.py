@@ -7,8 +7,8 @@ import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
 
-from aiohttp import web
 import pytest
+from aiohttp import web
 
 # ---------------------------------------------------------------------------
 # Host / CI Shim: minimal Home Assistant mock modules if not installed
@@ -208,7 +208,14 @@ def mock_hass():
     hass.states.async_all = MagicMock(return_value=[])
     hass.states.get = MagicMock(return_value=None)
     hass.bus.async_fire = MagicMock()
+    hass.async_add_executor_job = AsyncMock(side_effect=lambda func, *args: func(*args))
     return hass
+
+
+@pytest.fixture
+def anyio_backend():
+    """Confine anyio tests to the asyncio event loop."""
+    return "asyncio"
 
 
 @pytest.fixture
