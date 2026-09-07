@@ -36,6 +36,37 @@ def include_representer(dumper, data):
 yaml.SafeDumper.add_representer(Secret, secret_representer)
 yaml.SafeDumper.add_representer(Include, include_representer)
 
+DEFAULT_YAML_HEADER = [
+    "project_id: !secret googleassistant_projectName",
+    "service_account: !include SERVICE_ACCOUNT.json",
+    "report_state: true",
+    "secure_devices_pin: !secret google_device_pin",
+    "expose_by_default: false",
+]
+
+
+def extract_yaml_header(content: str | None) -> list[str]:
+    """Extract top-level header lines before entity_config: from existing YAML content."""
+    if not content or not isinstance(content, str) or not content.strip():
+        return list(DEFAULT_YAML_HEADER)
+
+    header_raw: list[str] = []
+    for line in content.splitlines():
+        if line.strip().startswith("entity_config:"):
+            break
+        header_raw.append(line)
+
+    while header_raw and (not header_raw[-1].strip() or header_raw[-1].strip().startswith("#")):
+        header_raw.pop()
+
+    trimmed_lines = [line.strip() for line in header_raw if line.strip()]
+
+    has_keys = any(":" in line and not line.startswith("#") for line in trimmed_lines)
+    if not has_keys:
+        return list(DEFAULT_YAML_HEADER)
+
+    return trimmed_lines
+
 
 import json
 
@@ -368,14 +399,25 @@ class RebuildView(HomeAssistantView):
                 key=lambda x: (x["floor"] or "TBA", x["area"] or "TBA", x["domain"], x["entity_id"])
             )
 
-            yaml_lines = [
-                "project_id: !secret googleassistant_projectName",
-                "service_account: !include homeassistantdocker-3f199-994a25247393.json",
-                "report_state: true",
-                "secure_devices_pin: !secret google_device_pin",
-                "expose_by_default: false",
-                "entity_config:"
-            ]
+            existing_filename = await get_current_yaml_filename(hass)
+            existing_filepath = None
+            if existing_filename:
+                cand_path = hass.config.path(existing_filename)
+                if os.path.exists(cand_path):
+                    existing_filepath = cand_path
+            if not existing_filepath and os.path.exists(filepath):
+                existing_filepath = filepath
+
+            existing_content = ""
+            if existing_filepath:
+                try:
+                    existing_content = await hass.async_add_executor_job(_read_file_content, existing_filepath)
+                except Exception as err:
+                    _LOGGER.warning("Failed to read existing YAML header from %s: %s", existing_filepath, err)
+                    existing_content = ""
+
+            header_lines = extract_yaml_header(existing_content)
+            yaml_lines = list(header_lines) + ["entity_config:"]
 
             current_floor = None
             current_area = None
