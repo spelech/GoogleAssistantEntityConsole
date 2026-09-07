@@ -1,12 +1,12 @@
 # Dashboard Theme Integration Guide
 
-Google Assistant Entity Console is designed to seamlessly blend into any Home Assistant environment. It automatically inherits the user's active Home Assistant theme (light, dark, or third-party custom themes) with zero configuration required.
+Google Assistant Entity Console inherits the active Home Assistant theme (light, dark, or custom community themes) using Home Assistant CSS custom properties.
 
 ---
 
 ## 1. How Theme Inheritance Works
 
-Home Assistant defines native CSS custom properties on the root document (`:root`) and custom elements. When the console panel opens inside the sidebar iframe, [`style.css`](file:///drives/nfs/repos/google-assistant-entity-console/custom_components/google_assistant_entity_console/static/style.css) maps standard Home Assistant theme variables directly into a modern **Material Design 3 (MD3)** design token system.
+Home Assistant defines native CSS custom properties on the root document (`:root`) and custom elements. When the console panel opens inside the sidebar iframe, [`style.css`](file:///drives/nfs/repos/google-assistant-entity-console/custom_components/google_assistant_entity_console/static/style.css) maps standard Home Assistant theme variables directly into a **Material Design 3 (MD3)** design token system.
 
 ```mermaid
 graph LR
@@ -38,7 +38,7 @@ The table below demonstrates how Home Assistant theme variables map to the conso
 
 ## 3. Supported Home Assistant Themes
 
-Because the mapping relies exclusively on standard Home Assistant CSS tokens, the console natively adapts to all popular community themes without extra CSS files or plugins:
+Because the mapping relies on standard Home Assistant CSS tokens, the console natively adapts to community themes without extra configuration or stylesheets:
 
 - **Default Home Assistant Theme** (Light & Dark Mode)
 - **Mushroom Theme** (Light & Dark)
@@ -47,18 +47,18 @@ Because the mapping relies exclusively on standard Home Assistant CSS tokens, th
 - **Nord & Dracula Themes**
 - **Minimalist & Soft UI Themes**
 
-When the user switches themes in Home Assistant settings or toggles Dark Mode, the iframe automatically reflects the updated colors.
+When the theme changes in Home Assistant or when toggling dark mode, the iframe dynamically updates to match.
 
 ---
 
-## 4. MD3 UI Components & Micro-Interactions
+## 4. UI Components & Styling
 
-The UI features a clean, responsive layout built with vanilla CSS:
+The UI is built with vanilla CSS following Material Design 3 specifications:
 
-- **Pill Shape Buttons (`.btn`)**: Styled with `border-radius: 100px` following MD3 specifications.
-- **Backdrop Blur Modals (`.modal-backdrop`)**: Semi-transparent overlays with `backdrop-filter: blur(8px)` for modern depth.
-- **Interactive Domain Chips (`.domain-chip`)**: Filter chips with smooth hover scale transitions and dynamic active state highlighting.
-- **Status Badges**: Color-coded indicator pills:
+- **Buttons (`.btn`)**: Styled with `border-radius: 100px` following MD3 pill specifications.
+- **Modal Overlays (`.modal-backdrop`)**: Semi-transparent overlays with `backdrop-filter: blur(8px)`.
+- **Domain Filter Chips (`.domain-chip`)**: Interactive chips with state highlighting and transitions.
+- **Status Badges**: Color-coded status indicators:
   - **Exposed**: Green (`var(--success-color)`)
   - **Pending Add**: Blue / Primary (`var(--primary-color)`)
   - **Pending Remove**: Amber / Warning

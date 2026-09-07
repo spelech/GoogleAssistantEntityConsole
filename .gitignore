@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 *.gz
 *.db
+.superpowers/
+.pytest_cache/

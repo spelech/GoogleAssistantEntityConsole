@@ -1,33 +1,30 @@
 # AI Assistant Integration Guide
 
-Google Assistant Entity Console features a flexible AI engine designed specifically for home automation self-hosters. It automates entity exposure decisions and alias creation using local LLMs or cloud providers.
+Google Assistant Entity Console includes optional AI features to generate voice nicknames and suggest entity exposure using either local LLMs or cloud providers.
 
 ---
 
 ## 1. Overview & Capabilities
 
-Setting up voice control with Google Assistant often requires coming up with natural-sounding voice aliases (nicknames) for dozens of smart devices, as well as deciding which entities should be accessible. The built-in AI Assistant simplifies this through three primary features:
+Configuring voice control for Google Assistant requires determining which entities to expose and assigning voice aliases (nicknames). The integration provides three AI endpoints:
 
 ### 1.1 Intent-Driven Exposure Suggestions (`AISuggestExposureView`)
-Instead of manually sifting through hundreds of Home Assistant entities, users can type natural language requests like:
-> *"Expose all living room lights, kitchen climate controls, and front door locks."*
-
-The AI evaluates the system entity inventory and returns a JSON list of matching entity IDs, instantly updating the pending exposure selection in the UI.
+Evaluates natural-language requests (such as *"Expose all living room lights, kitchen climate controls, and front door locks"*) against the active entity inventory. The endpoint returns a JSON array of matching entity IDs to update the pending exposure selection in the UI.
 
 ### 1.2 Bulk Nickname Generation (`AIGenerateNicknamesView`)
-Generates 2–4 natural voice aliases for a batch of entities. For example, for `light.kitchen_pendant_light_1`:
-- *"Kitchen Pendant"*
-- *"Island Light"*
-- *"Overhead Light"*
+Generates 2–4 voice aliases for a batch of entities based on entity IDs and friendly names. For example, for `light.kitchen_pendant_light_1`:
+- "Kitchen Pendant"
+- "Island Light"
+- "Overhead Light"
 
 ### 1.3 Room-Aware Single Entity Generation (`AIGenerateSingleEntityNicknameView`)
-When generating nicknames for a specific device, the AI inspects **all other entities in the same room** along with their current nicknames. This prevents duplicate or confusing aliases (e.g. avoiding naming two lights in the same room *"Desk Lamp"*).
+Generates voice aliases for a specific device while including all other entities in the same area in the prompt context. This avoids duplicate or conflicting aliases within the same room.
 
 ---
 
 ## 2. Provider Architecture
 
-The AI module supports two distinct provider backends:
+The AI module supports two provider backends:
 
 ```mermaid
 graph LR
@@ -43,9 +40,9 @@ graph LR
 ```
 
 ### 2.1 Provider 1: OpenAI-Compatible APIs
-Works with any API implementing the standard `/v1/chat/completions` and `/v1/models` endpoints:
-- **Local Self-Hosted**: [Ollama](https://ollama.com/) (via OpenWebUI or direct API), [LocalAI](https://localai.io/), [LM Studio](https://lmstudio.ai/), [vLLM](https://github.com/vllm-project/vllm).
-- **Cloud Providers**: OpenAI (GPT-4o, GPT-4o-mini), OpenRouter, Groq, DeepSeek.
+Works with any API implementing standard `/v1/chat/completions` and `/v1/models` endpoints:
+- **Local Self-Hosted**: [Ollama](https://ollama.com/), [LocalAI](https://localai.io/), [LM Studio](https://lmstudio.ai/), [vLLM](https://github.com/vllm-project/vllm).
+- **Cloud Providers**: OpenAI, OpenRouter, Groq, DeepSeek.
 
 #### Configuration Options:
 - **Base URL**: e.g., `http://192.168.1.100:11434/v1` (Ollama) or `https://openrouter.ai/api/v1`
@@ -54,15 +51,14 @@ Works with any API implementing the standard `/v1/chat/completions` and `/v1/mod
 
 ### 2.2 Provider 2: Home Assistant Native Conversation Agents
 Directly integrates with Home Assistant's internal `conversation` component via [`async_converse`](file:///drives/nfs/repos/google-assistant-entity-console/custom_components/google_assistant_entity_console/views.py#L589).
-- Enables use of local Assist conversation agents (such as Home Assistant's Ollama integration or Extended OpenAI Conversation) without needing separate API tokens inside the custom component.
-- Selectable directly via dropdown populated by `GET /api/google_assistant_entity_console/ai/ha_agents`.
+- Enables use of configured Assist conversation agents (such as Home Assistant's Ollama integration or Extended OpenAI Conversation) without requiring separate API tokens inside this component.
+- Selectable directly via a dropdown populated by `GET /api/google_assistant_entity_console/ai/ha_agents`.
 
 ---
 
 ## 3. Prompt Templates & Customization
 
-Prompt templates are customizable and stored in JSON format at:
-`google_assistant_entity_console_ai_settings.json`
+Prompt templates are customizable and stored in JSON format at `google_assistant_entity_console_ai_settings.json`.
 
 ### 3.1 Bulk Nickname Prompt Template
 ```
@@ -103,9 +99,10 @@ Entities:
 
 ---
 
-## 4. Privacy & Self-Hosting Best Practices
+## 4. Privacy & Local Deployment
 
-For privacy-focused self-hosters:
-1. **Zero External Data Leakage**: Point the Base URL to a local Ollama instance (`http://localhost:11434/v1`) running open-weights models such as `llama3`, `mistral`, or `qwen2.5`.
-2. **Low Memory Overhead**: Since nickname and exposure tasks are lightweight classification/generation tasks, small 3B–8B parameter models work exceptionally well.
-3. **No Third-Party Cloud Required**: AI features can be completely disabled or pointed purely locally.
+For local installations:
+1. **Local Endpoints**: Setting the Base URL to a local server (e.g. `http://localhost:11434/v1` for Ollama) ensures requests do not leave the local network.
+2. **Model Sizing**: Entity exposure selection and nickname generation are lightweight text tasks suitable for small open-weights models (3B–8B parameters).
+3. **No External Dependencies**: AI functionality is optional; the console operates fully without configuring an AI provider.
+
