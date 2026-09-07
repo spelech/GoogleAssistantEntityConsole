@@ -1,14 +1,14 @@
 # Google Assistant Entity Console Architecture
 
-This document provides a detailed technical overview of the **Google Assistant Entity Console** Home Assistant custom component architecture.
+This document provides a technical overview of the **Google Assistant Entity Console** Home Assistant custom component architecture.
 
 ---
 
 ## 1. System Overview
 
-Google Assistant Entity Console is a native Home Assistant integration that provides a direct sidebar management dashboard for exposing, hiding, alias-tagging, and blocklisting Home Assistant entities exposed to Google Assistant.
+Google Assistant Entity Console is a Home Assistant custom component that provides a sidebar management dashboard to configure entities exposed to Google Assistant, manage voice aliases, and maintain regex blocklists.
 
-It operates entirely inside the Home Assistant process, combining an `aiohttp` HTTP API backend with a responsive single-page web application served inside an iframe panel.
+It operates inside the Home Assistant process, combining an `aiohttp` HTTP API backend with a single-page web application served inside an iframe panel.
 
 ```mermaid
 graph TD
@@ -84,12 +84,12 @@ When the frontend queries `/api/google_assistant_entity_console/entities`, [`asy
 - **Light Group Detection**: Scans light groups and standard groups (`light.*`, `group.*`) to tag child entities as group members.
 - **Supported Domain Filter**: Validates entities against Google Assistant supported domains (`light`, `switch`, `climate`, `lock`, `cover`, `fan`, `vacuum`, `media_player`, `alarm_control_panel`, `camera`, `scene`, `script`, `sensor`, `binary_sensor`, etc.).
 
-### 3.2 Dynamic YAML Engine
+### 3.2 YAML Configuration Engine
 The integration parses and generates YAML configuration files compatible with Home Assistant's native `google_assistant:` integration.
 
-- **Safe YAML Parser/Dumper**: Custom `PyYAML` representers and loaders handle custom Home Assistant YAML tags (`!secret` and `!include`) without throwing parsing errors.
+- **Safe YAML Parser and Dumper**: Custom `PyYAML` representers and loaders handle custom Home Assistant YAML tags (`!secret` and `!include`) without errors.
 - **Include Detection**: Scans `configuration.yaml` for regex pattern `google_assistant:\s*!include\s*(gaGen_\d{6}\.yaml)`.
-- **Rebuild & Timestamping**: Generates new timestamped file (e.g. `gaGen_062226.yaml`) containing:
+- **Rebuild & Timestamping**: Generates a timestamped file (e.g. `gaGen_062226.yaml`) containing:
   ```yaml
   project_id: YOUR_PROJECT_ID
   service_account: !include SERVICE_ACCOUNT.json
@@ -103,7 +103,7 @@ The integration parses and generates YAML configuration files compatible with Ho
         - "Main Light"
         - "Overhead Light"
   ```
-- **Live Reload / Restart**: Offers choice to execute `homeassistant.reload_config_entry` (for zero-downtime updates) or `homeassistant.restart`.
+- **Live Reload / Restart**: Executes `homeassistant.reload_config_entry` (for zero-downtime updates) or `homeassistant.restart`.
 
 ### 3.3 Regex Blocklist Engine
 Entities matching user-defined regular expressions are filtered out before being rendered in the UI or exported to YAML.
@@ -117,7 +117,7 @@ Entities matching user-defined regular expressions are filtered out before being
 
 ## 4. Frontend Architecture
 
-The frontend is a lightweight Single-Page Application (SPA) contained within [`custom_components/google_assistant_entity_console/static/`](file:///drives/nfs/repos/google-assistant-entity-console/custom_components/google_assistant_entity_console/static/).
+The frontend is a Single-Page Application (SPA) contained within [`custom_components/google_assistant_entity_console/static/`](file:///drives/nfs/repos/google-assistant-entity-console/custom_components/google_assistant_entity_console/static/).
 
 ```
 static/
@@ -131,18 +131,26 @@ static/
 The panel Web Component (`<google-assistant-entity-console-panel>`) instantiates an `iframe` pointing to `/google_assistant_entity_console/static/index.html` and passes the active Home Assistant access token (`hass.auth.accessToken`) in the URL query string for authenticated API access.
 
 ### 4.2 Dual Grouping Layout Engine
-The UI supports two real-time organizational hierarchies:
+The UI organizes entities according to two selectable hierarchies:
+
 1. **Location-First (Default)**:
-   $$\text{Floor} \longrightarrow \text{Room (Area)} \longrightarrow \text{Domain} \longrightarrow \text{Entity Row}$$
+   - Floor
+     - Room (Area)
+       - Domain
+         - Entity Row
+
 2. **Domain-First (Alternate)**:
-   $$\text{Domain} \longrightarrow \text{Floor} \longrightarrow \text{Room (Area)} \longrightarrow \text{Entity Row}$$
+   - Domain
+     - Floor
+       - Room (Area)
+         - Entity Row
 
 ### 4.3 Interactive Entity Row Controls
 Each entity row rendered by `app.js` provides:
-- **Click-to-Toggle Status**: Toggles state between *Exposed*, *Pending Add*, *Pending Remove*, and *Unexposed*.
+- **Exposure Status**: Toggles state between *Exposed*, *Pending Add*, *Pending Remove*, and *Not Exposed*.
 - **Inline Renaming**: Double-click or edit icon to alter entity `display_name`.
-- **Nickname Badges**: Interactive chip list allowing instant addition/deletion of voice aliases.
-- **Quick Blocklist Button**: One-click regex pattern creation for blocking target entity domain or naming patterns.
+- **Nickname Badges**: Interactive chip list for adding and removing voice aliases.
+- **Quick Blocklist Button**: Generates regex patterns to block target entity domains or naming conventions.
 
 ---
 
@@ -160,3 +168,4 @@ Each entity row rendered by `app.js` provides:
 | `/api/google_assistant_entity_console/ai/generate_nicknames` | `POST` | Bulk nickname generation for entity array |
 | `/api/google_assistant_entity_console/ai/generate_single_nickname` | `POST` | Context-aware single entity nickname generation |
 | `/api/google_assistant_entity_console/ai/suggest_exposure` | `POST` | Intent-driven entity selection |
+
