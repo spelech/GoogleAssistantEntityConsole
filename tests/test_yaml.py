@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -355,9 +356,6 @@ entity_config:
 @pytest.mark.anyio
 async def test_yaml_header_rebuild_view_preserves_existing_header(mock_hass, tmp_path) -> None:
     """Test RebuildView preserves existing YAML header when rebuilding."""
-    import json
-    from unittest.mock import patch
-
     existing_yaml_content = """project_id: custom_proj
 service_account: !include my_existing_sa.json
 report_state: true
@@ -418,9 +416,6 @@ entity_config:
 @pytest.mark.anyio
 async def test_yaml_header_rebuild_view_defaults_when_no_existing_file(mock_hass, tmp_path) -> None:
     """Test RebuildView uses default template header when starting fresh with no existing YAML file."""
-    import json
-    from unittest.mock import patch
-
     mock_hass.config.path.side_effect = lambda f: str(tmp_path / f)
 
     sample_entities = [
