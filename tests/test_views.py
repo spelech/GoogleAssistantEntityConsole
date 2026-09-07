@@ -12,12 +12,6 @@ from custom_components.google_assistant_entity_console.views import (
     AIGenerateSingleEntityNicknameView,
 )
 
-@pytest.fixture
-def mock_hass():
-    hass = MagicMock()
-    # Mock config path
-    hass.config.path.return_value = "dummy_settings.json"
-    return hass
 
 def test_load_save_ai_settings(mock_hass):
     # Test setting loading on non-existing path
