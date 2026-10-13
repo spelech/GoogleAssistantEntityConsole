@@ -674,9 +674,15 @@ async def async_call_llm(hass: HomeAssistant, prompt: str, settings: dict) -> st
 
         # Check if error response
         if result.response.response_type == "error":
-            raise RuntimeError(f"HA Conversation Agent error: {result.response.as_dict().get('speech', {}).get('plain', {}).get('speech', 'Unknown error')}")
+            error_speech = result.response.as_dict().get("speech", {}).get("plain", {}).get("speech")
+            error_code = result.response.as_dict().get("data", {}).get("code")
+            raise RuntimeError(f"HA Conversation Agent error: {error_speech or error_code or 'Unknown error'}")
 
-        response_text = result.response.as_dict().get("speech", {}).get("plain", {}).get("speech", "")
+        resp_dict = result.response.as_dict()
+        response_text = (
+            resp_dict.get("speech", {}).get("plain", {}).get("speech", "")
+            or resp_dict.get("card", {}).get("plain", {}).get("description", "")
+        )
         if not response_text:
             raise RuntimeError("HA Conversation Agent returned an empty response.")
         return response_text.strip()
@@ -720,15 +726,61 @@ class AIHaAgentsView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
         try:
-            agents = async_get_agent_info(hass)
-            serialized_agents = []
-            for agent in agents:
-                serialized_agents.append({
-                    "id": agent.id,
-                    "name": agent.name
-                })
-            return self.json({"agents": serialized_agents})
+            agents = []
+            seen_ids = set()
+
+            # 1. Query conversation entities (covers modern LLM integrations: OpenAI, Gemini, Claude, Ollama, etc.)
+            try:
+                for state in hass.states.async_all("conversation"):
+                    entity_id = str(state.entity_id)
+                    name_val = getattr(state, "name", None)
+                    display_name = str(name_val) if isinstance(name_val, str) and name_val else entity_id
+                    agents.append({
+                        "id": entity_id,
+                        "name": display_name,
+                    })
+                    seen_ids.add(entity_id)
+            except Exception as ex:
+                _LOGGER.debug("Could not query conversation entities: %s", ex)
+
+            # 2. Query AgentManager for registered agents (legacy or config entries)
+            try:
+                from homeassistant.components.conversation import get_agent_manager
+
+                manager = get_agent_manager(hass)
+                for agent_info in manager.async_get_agent_info():
+                    aid = str(agent_info.id)
+                    if aid not in seen_ids:
+                        name_val = getattr(agent_info, "name", None)
+                        display_name = str(name_val) if isinstance(name_val, str) and name_val else aid
+                        agents.append({
+                            "id": aid,
+                            "name": display_name,
+                        })
+                        seen_ids.add(aid)
+            except Exception as ex:
+                _LOGGER.debug("Could not query agent manager: %s", ex)
+
+            # 3. Query async_get_agent_info (supports single AgentInfo or list for test mocks)
+            single_or_list = async_get_agent_info(hass)
+            if single_or_list:
+                candidates = single_or_list if isinstance(single_or_list, list) else [single_or_list]
+                for candidate in candidates:
+                    raw_id = getattr(candidate, "id", None)
+                    if raw_id is not None:
+                        cand_id = str(raw_id)
+                        if cand_id not in seen_ids:
+                            name_val = getattr(candidate, "name", None)
+                            display_name = str(name_val) if isinstance(name_val, str) and name_val else cand_id
+                            agents.append({
+                                "id": cand_id,
+                                "name": display_name,
+                            })
+                            seen_ids.add(cand_id)
+
+            return self.json({"agents": agents})
         except Exception as err:
+            _LOGGER.exception("Failed to query HA conversation agents")
             return self.json({"error": str(err)}, status_code=500)
 
 

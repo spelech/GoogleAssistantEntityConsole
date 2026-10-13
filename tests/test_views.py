@@ -465,6 +465,59 @@ async def test_ai_ha_agents_view_get_error(mock_hass):
         assert data["error"] == "Registry error"
 
 
+@pytest.mark.anyio
+async def test_ai_ha_agents_view_discovers_conversation_entities(mock_hass):
+    """Discovers modern conversation entities registered in the state machine."""
+    view = AIHaAgentsView()
+    request = AsyncMock()
+    request.app = {"hass": mock_hass}
+
+    entity_gemini = MagicMock(entity_id="conversation.google_generative_ai")
+    entity_gemini.name = "Google Gemini"
+    entity_ollama = MagicMock(entity_id="conversation.ollama")
+    entity_ollama.name = "Ollama Llama 3"
+    mock_hass.states.async_all.return_value = [entity_gemini, entity_ollama]
+
+    with patch("custom_components.google_assistant_entity_console.views.async_get_agent_info", return_value=None):
+        resp = await view.get(request)
+        assert resp.status == 200
+        data = json.loads(resp.body.decode())
+        assert data["agents"] == [
+            {"id": "conversation.google_generative_ai", "name": "Google Gemini"},
+            {"id": "conversation.ollama", "name": "Ollama Llama 3"},
+        ]
+
+
+@pytest.mark.anyio
+async def test_ai_ha_agents_view_deduplicates_agents(mock_hass):
+    """Deduplicates agents if reported by both conversation entities and agent manager."""
+    view = AIHaAgentsView()
+    request = AsyncMock()
+    request.app = {"hass": mock_hass}
+
+    entity_openai = MagicMock(entity_id="conversation.openai")
+    entity_openai.name = "OpenAI ChatGPT"
+    mock_hass.states.async_all.return_value = [entity_openai]
+
+    mgr_agent = MagicMock(id="conversation.openai")
+    mgr_agent.name = "OpenAI ChatGPT"
+    mock_manager = MagicMock()
+    mock_manager.async_get_agent_info.return_value = [mgr_agent]
+
+    mock_conv_mod = MagicMock()
+    mock_conv_mod.get_agent_manager.return_value = mock_manager
+
+    with (
+        patch.dict("sys.modules", {"homeassistant.components.conversation": mock_conv_mod}),
+        patch("custom_components.google_assistant_entity_console.views.async_get_agent_info", return_value=[mgr_agent]),
+    ):
+        resp = await view.get(request)
+        assert resp.status == 200
+        data = json.loads(resp.body.decode())
+        assert len(data["agents"]) == 1
+        assert data["agents"][0]["id"] == "conversation.openai"
+
+
 # ===========================================================================
 # 5. UpdateEntityView: POST
 # ===========================================================================
@@ -1154,6 +1207,47 @@ async def test_async_call_llm_ha_error_speech_unknown(mock_hass):
         pytest.raises(RuntimeError, match="HA Conversation Agent error: Unknown error"),
     ):
         await async_call_llm(mock_hass, "Test prompt", test_settings)
+
+
+@pytest.mark.anyio
+async def test_async_call_llm_ha_error_code_fallback(mock_hass):
+    """Falls back to data.code when speech is absent in error response."""
+    test_settings = {
+        "ai_source": "home_assistant",
+        "ha_agent_id": "conversation.openai",
+    }
+
+    mock_result = MagicMock()
+    mock_result.response.response_type = "error"
+    mock_result.response.as_dict.return_value = {
+        "data": {"code": "intent_not_supported"}
+    }
+
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent error: intent_not_supported"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
+
+
+@pytest.mark.anyio
+async def test_async_call_llm_ha_card_fallback(mock_hass):
+    """Falls back to card description when speech is empty."""
+    test_settings = {
+        "ai_source": "home_assistant",
+        "ha_agent_id": "conversation.openai",
+    }
+
+    mock_result = MagicMock()
+    mock_result.response.response_type = "action_done"
+    mock_result.response.as_dict.return_value = {
+        "speech": {"plain": {"speech": ""}},
+        "card": {"plain": {"description": "alias1, alias2"}},
+    }
+
+    with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
+        res = await async_call_llm(mock_hass, "Suggest nicknames", test_settings)
+        assert res == "alias1, alias2"
 
 
 @pytest.mark.anyio
