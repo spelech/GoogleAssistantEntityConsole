@@ -16,7 +16,6 @@ from custom_components.google_assistant_entity_console.views import (
     save_blocklist,
 )
 
-
 # ===========================================================================
 # 1. Storage & Persistence: load_blocklist and save_blocklist
 # ===========================================================================

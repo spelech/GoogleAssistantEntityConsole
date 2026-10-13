@@ -37,7 +37,6 @@ from custom_components.google_assistant_entity_console.views import (
     save_ai_settings,
 )
 
-
 # ===========================================================================
 # 1. Storage & Persistence Helpers: load_ai_settings and save_ai_settings
 # ===========================================================================
@@ -1131,9 +1130,11 @@ async def test_async_call_llm_ha_error_speech(mock_hass):
         "speech": {"plain": {"speech": "Failed to contact upstream conversation model"}},
     }
 
-    with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
-        with pytest.raises(RuntimeError, match="HA Conversation Agent error: Failed to contact upstream conversation model"):
-            await async_call_llm(mock_hass, "Test prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent error: Failed to contact upstream conversation model"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
 
 
 @pytest.mark.anyio
@@ -1148,9 +1149,11 @@ async def test_async_call_llm_ha_error_speech_unknown(mock_hass):
     mock_result.response.response_type = "error"
     mock_result.response.as_dict.return_value = {}
 
-    with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
-        with pytest.raises(RuntimeError, match="HA Conversation Agent error: Unknown error"):
-            await async_call_llm(mock_hass, "Test prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent error: Unknown error"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
 
 
 @pytest.mark.anyio
@@ -1167,9 +1170,11 @@ async def test_async_call_llm_ha_empty_speech(mock_hass):
         "speech": {"plain": {"speech": ""}},
     }
 
-    with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
-        with pytest.raises(RuntimeError, match="HA Conversation Agent returned an empty response"):
-            await async_call_llm(mock_hass, "Test prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent returned an empty response"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
 
 
 @pytest.mark.anyio
@@ -1306,9 +1311,11 @@ async def test_async_call_llm_openai_http_error(mock_hass, err_status, err_body)
     mock_session = MagicMock()
     mock_session.post.return_value.__aenter__.return_value = mock_resp
 
-    with patch("custom_components.google_assistant_entity_console.views.async_get_clientsession", return_value=mock_session):
-        with pytest.raises(RuntimeError, match=f"API Error \\({err_status}\\): {err_body}"):
-            await async_call_llm(mock_hass, "Prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_get_clientsession", return_value=mock_session),
+        pytest.raises(RuntimeError, match=f"API Error \\({err_status}\\): {err_body}"),
+    ):
+        await async_call_llm(mock_hass, "Prompt", test_settings)
 
 
 # ===========================================================================

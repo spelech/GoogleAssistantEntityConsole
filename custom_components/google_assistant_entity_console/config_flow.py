@@ -1,11 +1,13 @@
 from homeassistant import config_entries
+
 from .const import DOMAIN
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Google Assistant Entity Console."""
-    
+
     VERSION = 1
-    
+
     async def async_step_user(self, user_input=None):
         """Handle the initial step."""
         if self._async_current_entries():

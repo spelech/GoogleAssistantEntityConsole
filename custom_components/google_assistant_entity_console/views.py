@@ -1,17 +1,21 @@
+import json
 import logging
 import os
 import re
-from aiohttp import web
-import yaml
+from typing import Any
 
+import yaml
+from aiohttp import web
+from homeassistant.components.conversation import async_converse, async_get_agent_info
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import (
     area_registry,
     device_registry,
     entity_registry,
     floor_registry,
 )
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
@@ -67,9 +71,6 @@ def extract_yaml_header(content: str | None) -> list[str]:
 
     return trimmed_lines
 
-
-import json
-from typing import Any
 
 
 def _sync_read_json(filepath: str, default: Any) -> Any:
@@ -160,15 +161,15 @@ async def load_yaml_exposed_entities(hass: HomeAssistant, filename: str):
     if not filename:
         return {}
     filepath = hass.config.path(filename)
-    
+
     try:
         class CustomLoader(yaml.SafeLoader):
             pass
         CustomLoader.add_constructor('!secret', lambda loader, node: node.value)
         CustomLoader.add_constructor('!include', lambda loader, node: node.value)
-        
+
         content = await hass.async_add_executor_job(_read_file_content, filepath)
-        
+
         data = yaml.load(content, Loader=CustomLoader)
         if data and isinstance(data, dict):
             entity_config = data.get("entity_config", {})
@@ -286,7 +287,7 @@ async def async_fetch_entities_data(hass: HomeAssistant):
         area_id = entry.area_id
         if not area_id and device_id:
             area_id = device_area_map.get(device_id)
-        
+
         area_name = "TBA"
         floor_name = "TBA"
         if area_id:
@@ -359,7 +360,7 @@ class EntitiesView(HomeAssistantView):
         try:
             entities = await async_fetch_entities_data(hass)
             yaml_filename = (await get_current_yaml_filename(hass)) or "None"
-            
+
             # Read version natively via Home Assistant loader
             from homeassistant.loader import async_get_integration
             try:
@@ -474,7 +475,7 @@ class RebuildView(HomeAssistantView):
                     continue
 
                 exposed_count += 1
-                
+
                 # Check for Floor transition
                 ent_floor = entity["floor"] or "TBA"
                 if ent_floor != current_floor:
@@ -587,7 +588,7 @@ class BlocklistView(HomeAssistantView):
             blocklist = body.get("blocklist")
             if not isinstance(blocklist, list):
                 return self.json({"error": "Blocklist must be a list"}, status_code=400)
-            
+
             # Syntax validation for regexes
             for pattern in blocklist:
                 if not isinstance(pattern, str):
@@ -654,19 +655,15 @@ async def async_save_ai_settings(hass: HomeAssistant, settings: dict) -> None:
     await hass.async_add_executor_job(save_ai_settings, hass, settings)
 
 
-# AI API Views
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.components.conversation import async_converse, async_get_agent_info
-from homeassistant.core import Context
 
 async def async_call_llm(hass: HomeAssistant, prompt: str, settings: dict) -> str:
     ai_source = settings.get("ai_source", "openai")
-    
+
     if ai_source == "home_assistant":
         ha_agent_id = settings.get("ha_agent_id")
         if not ha_agent_id:
             raise ValueError("Home Assistant conversation agent is not selected. Please configure it in Settings.")
-            
+
         result = await async_converse(
             hass=hass,
             text=prompt,
@@ -674,29 +671,29 @@ async def async_call_llm(hass: HomeAssistant, prompt: str, settings: dict) -> st
             context=Context(),
             agent_id=ha_agent_id
         )
-        
+
         # Check if error response
         if result.response.response_type == "error":
             raise RuntimeError(f"HA Conversation Agent error: {result.response.as_dict().get('speech', {}).get('plain', {}).get('speech', 'Unknown error')}")
-            
+
         response_text = result.response.as_dict().get("speech", {}).get("plain", {}).get("speech", "")
         if not response_text:
             raise RuntimeError("HA Conversation Agent returned an empty response.")
         return response_text.strip()
-        
+
     else: # openai compatible api
         base_url = settings.get("base_url", "").rstrip("/")
         api_key = settings.get("api_key", "")
         model = settings.get("model", "")
-        
+
         if not base_url or not model:
             raise ValueError("AI settings are incomplete. Please configure base URL and Model in Settings.")
-            
+
         session = async_get_clientsession(hass)
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-            
+
         payload = {
             "model": model,
             "messages": [
@@ -705,7 +702,7 @@ async def async_call_llm(hass: HomeAssistant, prompt: str, settings: dict) -> st
             "temperature": 0.1,
             "max_tokens": 1000
         }
-        
+
         async with session.post(f"{base_url}/chat/completions", headers=headers, json=payload, timeout=25) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -754,7 +751,7 @@ class AISettingsView(HomeAssistantView):
             settings = body.get("settings", {})
             if not isinstance(settings, dict):
                 return self.json({"error": "Settings must be a dictionary"}, status_code=400)
-            
+
             await async_save_ai_settings(hass, settings)
             return self.json({"success": True, "settings": settings})
         except Exception as err:
@@ -771,23 +768,23 @@ class AIModelsView(HomeAssistantView):
             body = await request.json()
             base_url = body.get("base_url", "").rstrip("/")
             api_key = body.get("api_key", "")
-            
+
             if not base_url:
                 return self.json({"error": "Missing base URL"}, status_code=400)
-                
+
             session = async_get_clientsession(hass)
             headers = {}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
-                
+
             async with session.get(f"{base_url}/models", headers=headers, timeout=10) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     return self.json({"error": f"Failed to fetch models (HTTP {resp.status}): {text}"}, status_code=resp.status)
-                
+
                 data = await resp.json()
                 models = []
-                
+
                 def parse_item(item):
                     if not isinstance(item, dict) or "id" not in item:
                         return None
@@ -807,7 +804,7 @@ class AIModelsView(HomeAssistantView):
                         parsed = parse_item(item)
                         if parsed:
                             models.append(parsed)
-                
+
                 # Sort models by name
                 models.sort(key=lambda m: m["name"].lower())
                 return self.json({"models": models})
@@ -827,10 +824,10 @@ class AIGenerateNicknamesView(HomeAssistantView):
             entities_to_gen = body.get("entities", [])
             if not entities_to_gen:
                 return self.json({"error": "No entities provided"}, status_code=400)
-                
+
             settings = await async_load_ai_settings(hass)
             prompt_template = settings.get("nickname_prompt", "").strip()
-            
+
             # Default fallback template
             if not prompt_template:
                 prompt_template = (
@@ -842,12 +839,12 @@ class AIGenerateNicknamesView(HomeAssistantView):
                     "Friendly Name: {friendly_name}\n"
                     "Aliases:"
                 )
-                
+
             results = {}
             for ent in entities_to_gen:
                 ent_id = ent.get("entity_id")
                 friendly = ent.get("display_name") or ent.get("name") or ent_id.split(".")[-1]
-                
+
                 # Render prompt
                 prompt = prompt_template.format(entity_id=ent_id, friendly_name=friendly)
                 try:
@@ -856,7 +853,7 @@ class AIGenerateNicknamesView(HomeAssistantView):
                     results[ent_id] = aliases
                 except Exception as err:
                     _LOGGER.error("LLM nickname request failed for %s: %s", ent_id, err)
-                        
+
             return self.json({"results": results})
         except Exception as err:
             _LOGGER.exception("Failed to generate nicknames")
@@ -873,15 +870,15 @@ class AISuggestExposureView(HomeAssistantView):
             body = await request.json()
             entity_list = body.get("entities", [])
             user_intent = body.get("user_intent", "")
-            
+
             if not entity_list:
                 return self.json({"error": "No entities provided"}, status_code=400)
             if not user_intent:
                 return self.json({"error": "No user intent/criteria provided"}, status_code=400)
-                
+
             settings = await async_load_ai_settings(hass)
             prompt_template = settings.get("exposure_prompt", "").strip()
-            
+
             # Default fallback template
             if not prompt_template:
                 prompt_template = (
@@ -892,7 +889,7 @@ class AISuggestExposureView(HomeAssistantView):
                     "Entities:\n"
                     "{entities_list}"
                 )
-                
+
             # Serialize entities briefly for the prompt context
             serialized_ents = []
             for ent in entity_list:
@@ -901,18 +898,18 @@ class AISuggestExposureView(HomeAssistantView):
                     "name": ent.get("display_name") or ent.get("name"),
                     "domain": ent.get("domain")
                 })
-                
+
             entities_str = json.dumps(serialized_ents, indent=2)
             prompt = prompt_template.format(user_intent=user_intent, entities_list=entities_str)
-            
+
             content = await async_call_llm(hass, prompt, settings)
-            
+
             # Clean markdown formatting if returned
             if content.startswith("```"):
                 content = re.sub(r"^```[a-zA-Z]*\n?", "", content)
                 content = re.sub(r"\n?```$", "", content)
             content = content.strip()
-            
+
             try:
                 exposed_ids = json.loads(content)
                 if isinstance(exposed_ids, list):
@@ -936,13 +933,13 @@ class AIGenerateSingleEntityNicknameView(HomeAssistantView):
             entity_id = body.get("entity_id")
             display_name = body.get("display_name")
             room_entities = body.get("room_entities", [])
-            
+
             if not entity_id:
                 return self.json({"error": "Missing entity_id"}, status_code=400)
-                
+
             settings = await async_load_ai_settings(hass)
             prompt_template = settings.get("single_nickname_prompt", "").strip()
-            
+
             # Default fallback template
             if not prompt_template:
                 prompt_template = (
@@ -956,7 +953,7 @@ class AIGenerateSingleEntityNicknameView(HomeAssistantView):
                     "Other Entities in same room: {room_context}\n"
                     "Aliases:"
                 )
-                
+
             # Serialize room context with names and current nicknames/aliases
             context_list = []
             for e in room_entities:
@@ -965,13 +962,13 @@ class AIGenerateSingleEntityNicknameView(HomeAssistantView):
                     aliases_str = f", current nicknames: {aliases_list}" if aliases_list else ""
                     context_list.append(f"{e.get('entity_id')} (name: {e.get('display_name') or e.get('name') or ''}{aliases_str})")
             room_context_str = "; ".join(context_list) if context_list else "None"
-            
+
             prompt = prompt_template.format(
                 entity_id=entity_id,
                 friendly_name=display_name or entity_id.split(".")[-1],
                 room_context=room_context_str
             )
-            
+
             content = await async_call_llm(hass, prompt, settings)
             aliases = [a.strip().strip('"').strip("'") for a in content.split(",") if a.strip()]
             return self.json({"aliases": aliases})
