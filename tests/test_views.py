@@ -31,6 +31,8 @@ from custom_components.google_assistant_entity_console.views import (
     UpdateEntityView,
     async_call_llm,
     async_fetch_entities_data,
+    async_load_ai_settings,
+    async_save_ai_settings,
     load_ai_settings,
     save_ai_settings,
 )
@@ -67,6 +69,20 @@ def test_save_and_load_ai_settings_roundtrip(mock_hass, tmp_path):
     assert data == sample_settings
 
     loaded = load_ai_settings(mock_hass)
+    assert loaded == sample_settings
+
+
+@pytest.mark.anyio
+async def test_async_save_and_load_ai_settings_roundtrip(mock_hass, tmp_path):
+    """Persists settings asynchronously and accurately reloads them."""
+    mock_hass.config.path.side_effect = lambda filename: str(tmp_path / filename)
+    sample_settings = {
+        "ai_source": "home_assistant",
+        "ha_agent_id": "conversation.home_assistant",
+    }
+
+    await async_save_ai_settings(mock_hass, sample_settings)
+    loaded = await async_load_ai_settings(mock_hass)
     assert loaded == sample_settings
 
 

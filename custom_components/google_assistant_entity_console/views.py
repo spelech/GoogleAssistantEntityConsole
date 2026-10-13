@@ -69,31 +69,76 @@ def extract_yaml_header(content: str | None) -> list[str]:
 
 
 import json
+from typing import Any
 
-def load_blocklist(hass: HomeAssistant) -> list:
-    filepath = hass.config.path("google_assistant_entity_console_blocklist.json")
+
+def _sync_read_json(filepath: str, default: Any) -> Any:
     if not os.path.exists(filepath):
-        return []
+        return default
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if isinstance(data, list):
-                return data
+            return data
     except Exception as err:
-        _LOGGER.error("Failed to load blocklist: %s", err)
-    return []
+        _LOGGER.error("Failed to load JSON from %s: %s", filepath, err)
+        return default
 
-def save_blocklist(hass: HomeAssistant, blocklist: list):
-    filepath = hass.config.path("google_assistant_entity_console_blocklist.json")
+
+def _sync_write_json(filepath: str, data: Any) -> None:
     try:
         with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(blocklist, f, indent=2)
+            json.dump(data, f, indent=2)
     except Exception as err:
-        _LOGGER.error("Failed to save blocklist: %s", err)
+        _LOGGER.error("Failed to save JSON to %s: %s", filepath, err)
+
+
+def _sync_write_file(path: str, content: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def _sync_update_config_include(config_path: str, filename: str) -> bool:
+    if not os.path.exists(config_path):
+        return False
+    with open(config_path, "r", encoding="utf-8") as f:
+        config_content = f.read()
+
+    include_pattern = r"google_assistant:\s*!include\s*(gaGen_\d{6}\.yaml)"
+    if re.search(include_pattern, config_content):
+        updated = re.sub(
+            include_pattern,
+            f"google_assistant: !include {filename}",
+            config_content,
+        )
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        return True
+    return False
+
+
+def load_blocklist(hass: HomeAssistant) -> list:
+    filepath = hass.config.path("google_assistant_entity_console_blocklist.json")
+    data = _sync_read_json(filepath, default=[])
+    return data if isinstance(data, list) else []
+
+
+def save_blocklist(hass: HomeAssistant, blocklist: list) -> None:
+    filepath = hass.config.path("google_assistant_entity_console_blocklist.json")
+    _sync_write_json(filepath, blocklist)
+
+
+async def async_load_blocklist(hass: HomeAssistant) -> list:
+    return await hass.async_add_executor_job(load_blocklist, hass)
+
+
+async def async_save_blocklist(hass: HomeAssistant, blocklist: list) -> None:
+    await hass.async_add_executor_job(save_blocklist, hass, blocklist)
+
 
 def _read_file_content(path):
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
 
 
 async def get_current_yaml_filename(hass: HomeAssistant):
@@ -187,7 +232,7 @@ async def async_fetch_entities_data(hass: HomeAssistant):
         device_name_map[device.id] = device.name_by_user or device.name
 
     # Load blocklist
-    blocklist = load_blocklist(hass)
+    blocklist = await async_load_blocklist(hass)
     compiled_blocklist = []
     for pattern in blocklist:
         try:
@@ -483,30 +528,21 @@ class RebuildView(HomeAssistantView):
             except Exception as val_err:
                 return self.json({"error": f"Generated YAML failed validation: {val_err}"}, status_code=500)
 
-            # Write file
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(cleaned_yaml)
+            # Write file via executor job
+            await hass.async_add_executor_job(_sync_write_file, filepath, cleaned_yaml)
 
-            # Dynamically update configuration.yaml
+            # Dynamically update configuration.yaml via executor job
             config_path = hass.config.path("configuration.yaml")
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config_content = f.read()
-                
-                include_pattern = r"google_assistant:\s*!include\s*gaGen_\d{6}\.yaml"
-                if re.search(include_pattern, config_content):
-                    config_content = re.sub(
-                        include_pattern,
-                        f"google_assistant: !include {filename}",
-                        config_content
-                    )
-                    with open(config_path, "w", encoding="utf-8") as f:
-                        f.write(config_content)
-                else:
-                    _LOGGER.warning("Could not find google_assistant !include line in configuration.yaml")
+            has_include = await hass.async_add_executor_job(
+                _sync_update_config_include, config_path, filename
+            )
+            if not has_include:
+                _LOGGER.warning("Could not find google_assistant !include line in configuration.yaml")
 
             return self.json({
                 "success": True,
+                "has_include_directive": has_include,
+                "required_include": f"google_assistant: !include {filename}",
                 "exposed_count": exposed_count,
                 "yaml_written": filepath
             })
@@ -536,7 +572,7 @@ class BlocklistView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
         try:
-            blocklist = load_blocklist(hass)
+            blocklist = await async_load_blocklist(hass)
             return self.json({"blocklist": blocklist})
         except Exception as err:
             _LOGGER.exception("Failed to get blocklist")
@@ -561,7 +597,7 @@ class BlocklistView(HomeAssistantView):
                 except (re.error, TypeError) as err:
                     return self.json({"error": f"Invalid regex pattern '{pattern}': {err}"}, status_code=400)
 
-            save_blocklist(hass, blocklist)
+            await async_save_blocklist(hass, blocklist)
             return self.json({"success": True, "blocklist": blocklist})
         except Exception as err:
             _LOGGER.exception("Failed to update blocklist")
@@ -587,10 +623,10 @@ class BlocklistAddView(HomeAssistantView):
             except (re.error, TypeError) as err:
                 return self.json({"error": f"Invalid regex pattern: {err}"}, status_code=400)
 
-            blocklist = load_blocklist(hass)
+            blocklist = await async_load_blocklist(hass)
             if pattern not in blocklist:
                 blocklist.append(pattern)
-                save_blocklist(hass, blocklist)
+                await async_save_blocklist(hass, blocklist)
 
             return self.json({"success": True, "blocklist": blocklist})
         except Exception as err:
@@ -601,24 +637,21 @@ class BlocklistAddView(HomeAssistantView):
 # AI Settings Storage Helpers
 def load_ai_settings(hass: HomeAssistant) -> dict:
     filepath = hass.config.path("google_assistant_entity_console_ai_settings.json")
-    if not os.path.exists(filepath):
-        return {}
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, dict):
-                return data
-    except Exception as err:
-        _LOGGER.error("Failed to load AI settings: %s", err)
-    return {}
+    data = _sync_read_json(filepath, default={})
+    return data if isinstance(data, dict) else {}
 
-def save_ai_settings(hass: HomeAssistant, settings: dict):
+
+def save_ai_settings(hass: HomeAssistant, settings: dict) -> None:
     filepath = hass.config.path("google_assistant_entity_console_ai_settings.json")
-    try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=2)
-    except Exception as err:
-        _LOGGER.error("Failed to save AI settings: %s", err)
+    _sync_write_json(filepath, settings)
+
+
+async def async_load_ai_settings(hass: HomeAssistant) -> dict:
+    return await hass.async_add_executor_job(load_ai_settings, hass)
+
+
+async def async_save_ai_settings(hass: HomeAssistant, settings: dict) -> None:
+    await hass.async_add_executor_job(save_ai_settings, hass, settings)
 
 
 # AI API Views
@@ -709,7 +742,7 @@ class AISettingsView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         hass = request.app["hass"]
         try:
-            settings = load_ai_settings(hass)
+            settings = await async_load_ai_settings(hass)
             return self.json({"settings": settings})
         except Exception as err:
             return self.json({"error": str(err)}, status_code=500)
@@ -722,7 +755,7 @@ class AISettingsView(HomeAssistantView):
             if not isinstance(settings, dict):
                 return self.json({"error": "Settings must be a dictionary"}, status_code=400)
             
-            save_ai_settings(hass, settings)
+            await async_save_ai_settings(hass, settings)
             return self.json({"success": True, "settings": settings})
         except Exception as err:
             return self.json({"error": str(err)}, status_code=500)
@@ -795,10 +828,7 @@ class AIGenerateNicknamesView(HomeAssistantView):
             if not entities_to_gen:
                 return self.json({"error": "No entities provided"}, status_code=400)
                 
-            settings = load_ai_settings(hass)
-            base_url = settings.get("base_url", "").rstrip("/")
-            api_key = settings.get("api_key", "")
-            model = settings.get("model", "")
+            settings = await async_load_ai_settings(hass)
             prompt_template = settings.get("nickname_prompt", "").strip()
             
             # Default fallback template
@@ -849,10 +879,7 @@ class AISuggestExposureView(HomeAssistantView):
             if not user_intent:
                 return self.json({"error": "No user intent/criteria provided"}, status_code=400)
                 
-            settings = load_ai_settings(hass)
-            base_url = settings.get("base_url", "").rstrip("/")
-            api_key = settings.get("api_key", "")
-            model = settings.get("model", "")
+            settings = await async_load_ai_settings(hass)
             prompt_template = settings.get("exposure_prompt", "").strip()
             
             # Default fallback template
@@ -913,10 +940,7 @@ class AIGenerateSingleEntityNicknameView(HomeAssistantView):
             if not entity_id:
                 return self.json({"error": "Missing entity_id"}, status_code=400)
                 
-            settings = load_ai_settings(hass)
-            base_url = settings.get("base_url", "").rstrip("/")
-            api_key = settings.get("api_key", "")
-            model = settings.get("model", "")
+            settings = await async_load_ai_settings(hass)
             prompt_template = settings.get("single_nickname_prompt", "").strip()
             
             # Default fallback template

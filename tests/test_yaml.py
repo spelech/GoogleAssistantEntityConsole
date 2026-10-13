@@ -398,6 +398,8 @@ entity_config:
         data = json.loads(resp.body.decode())
         assert data["success"] is True
         assert data["exposed_count"] == 1
+        assert data["has_include_directive"] is True
+        assert "required_include" in data
 
         written_path = data["yaml_written"]
         with open(written_path, "r", encoding="utf-8") as f:
@@ -441,6 +443,8 @@ async def test_yaml_header_rebuild_view_defaults_when_no_existing_file(mock_hass
         resp = await view.post(request)
         data = json.loads(resp.body.decode())
         assert data["success"] is True
+        assert data["has_include_directive"] is False
+        assert data["required_include"].startswith("google_assistant: !include gaGen_")
 
         written_path = data["yaml_written"]
         with open(written_path, "r", encoding="utf-8") as f:
