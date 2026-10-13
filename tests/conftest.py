@@ -134,7 +134,9 @@ except ImportError:
         url = None
         name = None
         requires_auth = True
-        extra_urls = []
+
+        def __init__(self):
+            self.extra_urls = []
 
         def json(self, result, status_code: int = 200, headers: dict | None = None):
             return web.json_response(result, status=status_code, headers=headers)

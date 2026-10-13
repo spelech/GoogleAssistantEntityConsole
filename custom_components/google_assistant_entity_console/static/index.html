@@ -180,9 +180,23 @@
 
     <!-- Restart Confirmation Modal -->
     <div id="restartModal" class="modal">
-        <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <div class="modal-content" style="max-width: 480px; text-align: center;">
             <div class="modal-header" style="border-bottom: none; justify-content: center;">
                 <h2>Restart Home Assistant?</h2>
+            </div>
+            <div id="missingIncludeContainer" style="display: none; text-align: left; background-color: var(--surface-variant); border: 1px solid #f59e0b; border-radius: 8px; padding: 0.8rem; margin: 0.25rem 0 1rem;">
+                <div style="font-weight: 600; color: #f59e0b; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Action Required in configuration.yaml
+                </div>
+                <p style="margin: 0 0 0.5rem 0; font-size: 0.8rem; color: var(--on-surface-variant); line-height: 1.35;">
+                    Could not find an include directive in <code>configuration.yaml</code>. Add this line to link the generated config:
+                </p>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <input type="text" id="missingIncludeInput" readonly class="form-input" style="font-family: monospace; font-size: 0.8rem; flex-grow: 1; padding: 0.4rem 0.5rem;">
+                    <button type="button" id="copyIncludeBtn" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem; white-space: nowrap;">
+                        <i class="fa-solid fa-copy"></i> Copy
+                    </button>
+                </div>
             </div>
             <p style="margin: 0.5rem 0 1rem; color: var(--on-surface-variant); font-size: 0.95rem; line-height: 1.5;">
                 The new Google Assistant YAML configuration has been successfully rebuilt. Would you like to restart Home Assistant now to apply the changes?

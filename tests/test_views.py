@@ -31,10 +31,11 @@ from custom_components.google_assistant_entity_console.views import (
     UpdateEntityView,
     async_call_llm,
     async_fetch_entities_data,
+    async_load_ai_settings,
+    async_save_ai_settings,
     load_ai_settings,
     save_ai_settings,
 )
-
 
 # ===========================================================================
 # 1. Storage & Persistence Helpers: load_ai_settings and save_ai_settings
@@ -67,6 +68,20 @@ def test_save_and_load_ai_settings_roundtrip(mock_hass, tmp_path):
     assert data == sample_settings
 
     loaded = load_ai_settings(mock_hass)
+    assert loaded == sample_settings
+
+
+@pytest.mark.anyio
+async def test_async_save_and_load_ai_settings_roundtrip(mock_hass, tmp_path):
+    """Persists settings asynchronously and accurately reloads them."""
+    mock_hass.config.path.side_effect = lambda filename: str(tmp_path / filename)
+    sample_settings = {
+        "ai_source": "home_assistant",
+        "ha_agent_id": "conversation.home_assistant",
+    }
+
+    await async_save_ai_settings(mock_hass, sample_settings)
+    loaded = await async_load_ai_settings(mock_hass)
     assert loaded == sample_settings
 
 
@@ -448,6 +463,59 @@ async def test_ai_ha_agents_view_get_error(mock_hass):
         assert resp.status == 500
         data = json.loads(resp.body.decode())
         assert data["error"] == "Registry error"
+
+
+@pytest.mark.anyio
+async def test_ai_ha_agents_view_discovers_conversation_entities(mock_hass):
+    """Discovers modern conversation entities registered in the state machine."""
+    view = AIHaAgentsView()
+    request = AsyncMock()
+    request.app = {"hass": mock_hass}
+
+    entity_gemini = MagicMock(entity_id="conversation.google_generative_ai")
+    entity_gemini.name = "Google Gemini"
+    entity_ollama = MagicMock(entity_id="conversation.ollama")
+    entity_ollama.name = "Ollama Llama 3"
+    mock_hass.states.async_all.return_value = [entity_gemini, entity_ollama]
+
+    with patch("custom_components.google_assistant_entity_console.views.async_get_agent_info", return_value=None):
+        resp = await view.get(request)
+        assert resp.status == 200
+        data = json.loads(resp.body.decode())
+        assert data["agents"] == [
+            {"id": "conversation.google_generative_ai", "name": "Google Gemini"},
+            {"id": "conversation.ollama", "name": "Ollama Llama 3"},
+        ]
+
+
+@pytest.mark.anyio
+async def test_ai_ha_agents_view_deduplicates_agents(mock_hass):
+    """Deduplicates agents if reported by both conversation entities and agent manager."""
+    view = AIHaAgentsView()
+    request = AsyncMock()
+    request.app = {"hass": mock_hass}
+
+    entity_openai = MagicMock(entity_id="conversation.openai")
+    entity_openai.name = "OpenAI ChatGPT"
+    mock_hass.states.async_all.return_value = [entity_openai]
+
+    mgr_agent = MagicMock(id="conversation.openai")
+    mgr_agent.name = "OpenAI ChatGPT"
+    mock_manager = MagicMock()
+    mock_manager.async_get_agent_info.return_value = [mgr_agent]
+
+    mock_conv_mod = MagicMock()
+    mock_conv_mod.get_agent_manager.return_value = mock_manager
+
+    with (
+        patch.dict("sys.modules", {"homeassistant.components.conversation": mock_conv_mod}),
+        patch("custom_components.google_assistant_entity_console.views.async_get_agent_info", return_value=[mgr_agent]),
+    ):
+        resp = await view.get(request)
+        assert resp.status == 200
+        data = json.loads(resp.body.decode())
+        assert len(data["agents"]) == 1
+        assert data["agents"][0]["id"] == "conversation.openai"
 
 
 # ===========================================================================
@@ -1115,9 +1183,11 @@ async def test_async_call_llm_ha_error_speech(mock_hass):
         "speech": {"plain": {"speech": "Failed to contact upstream conversation model"}},
     }
 
-    with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
-        with pytest.raises(RuntimeError, match="HA Conversation Agent error: Failed to contact upstream conversation model"):
-            await async_call_llm(mock_hass, "Test prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent error: Failed to contact upstream conversation model"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
 
 
 @pytest.mark.anyio
@@ -1132,9 +1202,52 @@ async def test_async_call_llm_ha_error_speech_unknown(mock_hass):
     mock_result.response.response_type = "error"
     mock_result.response.as_dict.return_value = {}
 
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent error: Unknown error"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
+
+
+@pytest.mark.anyio
+async def test_async_call_llm_ha_error_code_fallback(mock_hass):
+    """Falls back to data.code when speech is absent in error response."""
+    test_settings = {
+        "ai_source": "home_assistant",
+        "ha_agent_id": "conversation.openai",
+    }
+
+    mock_result = MagicMock()
+    mock_result.response.response_type = "error"
+    mock_result.response.as_dict.return_value = {
+        "data": {"code": "intent_not_supported"}
+    }
+
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent error: intent_not_supported"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
+
+
+@pytest.mark.anyio
+async def test_async_call_llm_ha_card_fallback(mock_hass):
+    """Falls back to card description when speech is empty."""
+    test_settings = {
+        "ai_source": "home_assistant",
+        "ha_agent_id": "conversation.openai",
+    }
+
+    mock_result = MagicMock()
+    mock_result.response.response_type = "action_done"
+    mock_result.response.as_dict.return_value = {
+        "speech": {"plain": {"speech": ""}},
+        "card": {"plain": {"description": "alias1, alias2"}},
+    }
+
     with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
-        with pytest.raises(RuntimeError, match="HA Conversation Agent error: Unknown error"):
-            await async_call_llm(mock_hass, "Test prompt", test_settings)
+        res = await async_call_llm(mock_hass, "Suggest nicknames", test_settings)
+        assert res == "alias1, alias2"
 
 
 @pytest.mark.anyio
@@ -1151,9 +1264,11 @@ async def test_async_call_llm_ha_empty_speech(mock_hass):
         "speech": {"plain": {"speech": ""}},
     }
 
-    with patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result):
-        with pytest.raises(RuntimeError, match="HA Conversation Agent returned an empty response"):
-            await async_call_llm(mock_hass, "Test prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_converse", return_value=mock_result),
+        pytest.raises(RuntimeError, match="HA Conversation Agent returned an empty response"),
+    ):
+        await async_call_llm(mock_hass, "Test prompt", test_settings)
 
 
 @pytest.mark.anyio
@@ -1290,9 +1405,11 @@ async def test_async_call_llm_openai_http_error(mock_hass, err_status, err_body)
     mock_session = MagicMock()
     mock_session.post.return_value.__aenter__.return_value = mock_resp
 
-    with patch("custom_components.google_assistant_entity_console.views.async_get_clientsession", return_value=mock_session):
-        with pytest.raises(RuntimeError, match=f"API Error \\({err_status}\\): {err_body}"):
-            await async_call_llm(mock_hass, "Prompt", test_settings)
+    with (
+        patch("custom_components.google_assistant_entity_console.views.async_get_clientsession", return_value=mock_session),
+        pytest.raises(RuntimeError, match=f"API Error \\({err_status}\\): {err_body}"),
+    ):
+        await async_call_llm(mock_hass, "Prompt", test_settings)
 
 
 # ===========================================================================

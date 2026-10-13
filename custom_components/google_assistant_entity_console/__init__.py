@@ -1,28 +1,27 @@
 import logging
-import json
-import os
-from homeassistant.core import HomeAssistant
-from homeassistant.config_entries import ConfigEntry
+
 from homeassistant.components.frontend import (
     async_register_built_in_panel,
     async_remove_panel,
 )
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .views import (
+    AIGenerateNicknamesView,
+    AIGenerateSingleEntityNicknameView,
+    AIHaAgentsView,
+    AIModelsView,
+    AISettingsView,
+    AISuggestExposureView,
+    BlocklistAddView,
+    BlocklistView,
     EntitiesView,
-    UpdateEntityView,
     RebuildView,
     RestartView,
-    BlocklistView,
-    BlocklistAddView,
-    AISettingsView,
-    AIModelsView,
-    AIHaAgentsView,
-    AIGenerateNicknamesView,
-    AISuggestExposureView,
-    AIGenerateSingleEntityNicknameView,
+    UpdateEntityView,
 )
 
 _LOGGER = logging.getLogger(__name__)

@@ -10,10 +10,11 @@ from custom_components.google_assistant_entity_console.views import (
     BlocklistAddView,
     BlocklistView,
     async_fetch_entities_data,
+    async_load_blocklist,
+    async_save_blocklist,
     load_blocklist,
     save_blocklist,
 )
-
 
 # ===========================================================================
 # 1. Storage & Persistence: load_blocklist and save_blocklist
@@ -41,6 +42,17 @@ def test_save_and_load_blocklist_roundtrip(mock_hass, tmp_path):
     assert data == patterns
 
     loaded = load_blocklist(mock_hass)
+    assert loaded == patterns
+
+
+@pytest.mark.anyio
+async def test_async_save_and_load_blocklist_roundtrip(mock_hass, tmp_path):
+    """Saves list of patterns asynchronously and reloads accurately."""
+    mock_hass.config.path.side_effect = lambda filename: str(tmp_path / filename)
+    patterns = [r"^switch\.secret_.*", r".*_power$"]
+
+    await async_save_blocklist(mock_hass, patterns)
+    loaded = await async_load_blocklist(mock_hass)
     assert loaded == patterns
 
 
