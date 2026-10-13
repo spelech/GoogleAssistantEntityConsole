@@ -1,72 +1,54 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e293b"/>
-      <stop offset="100%" stop-color="#0f172a"/>
+    <!-- Top row gradient: Blue (#4285F4) to Red (#EA4335) -->
+    <linearGradient id="topRow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4285F4"/>
+      <stop offset="100%" stop-color="#EA4335"/>
     </linearGradient>
-    <linearGradient id="roofBlue" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#60a5fa"/>
-      <stop offset="100%" stop-color="#3b82f6"/>
+
+    <!-- Bottom row gradient: Yellow (#FBBC05) to Green (#34A853) -->
+    <linearGradient id="bottomRow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FBBC05"/>
+      <stop offset="100%" stop-color="#34A853"/>
     </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="4" result="blur" />
-      <feComposite in="SourceGraphic" in2="blur" operator="over" />
-    </filter>
+
+    <!-- Vertical alpha blend for bilinear 4-corner gradient -->
+    <linearGradient id="verticalBlend" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="1"/>
+    </linearGradient>
+
+    <mask id="verticalMask">
+      <rect x="0" y="0" width="512" height="512" fill="url(#verticalBlend)"/>
+    </mask>
+
+    <!-- Exact Home Assistant House Shape as Mask -->
+    <mask id="haHouseMask">
+      <g transform="translate(25.6, 25.6) scale(3.84)">
+        <g transform="matrix(.938408 0 0 .93841 -5.688557 -13.572944)">
+          <path fill="#ffffff" d="M73.5367 13.0937 106.463 46.0524v.0033C108.41 48.0043 110 51.848 110 54.6007v30.0292c0 2.7527-2.25 5.0049-5 5.0049l-70-.0034c-2.75 0-5-2.2522-5-5.0048V54.5974c0-2.7527 1.5933-6.5998 3.5367-8.545l32.93-32.9587c1.9433-1.9452 5.1266-1.9452 7.07 0Z" transform="matrix(1.598452 0 0 1.598452 -41.89164 -.937304)"/>
+        </g>
+      </g>
+    </mask>
   </defs>
 
-  <!-- App Icon Squircle Background -->
-  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGradient)" stroke="#334155" stroke-width="4"/>
-
-  <!-- Network Connecting Lines -->
-  <g stroke-linecap="round" stroke-linejoin="round">
-    <!-- House Outer Outline (Subtle Glow) -->
-    <path d="M 130 230 L 256 120 L 350 196 L 350 120 L 380 120 L 380 220 L 382 230 L 360 230 L 360 395 L 152 395 L 152 230 Z"
-          fill="none" stroke="#475569" stroke-width="16" stroke-opacity="0.6"/>
-
-    <!-- Internal Network Edges -->
-    <!-- Blue branch from Peak -->
-    <line x1="256" y1="120" x2="180" y2="230" stroke="#4285F4" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="256" y1="120" x2="256" y2="260" stroke="#4285F4" stroke-width="12" stroke-opacity="0.9"/>
-    
-    <!-- Red branch to Chimney -->
-    <line x1="256" y1="120" x2="350" y2="196" stroke="#EA4335" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="350" y1="196" x2="350" y2="120" stroke="#EA4335" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="256" y1="260" x2="332" y2="230" stroke="#EA4335" stroke-width="10" stroke-opacity="0.8"/>
-
-    <!-- Yellow branch in Core -->
-    <line x1="256" y1="260" x2="180" y2="325" stroke="#FBBC05" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="256" y1="260" x2="332" y2="325" stroke="#FBBC05" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="256" y1="260" x2="256" y2="395" stroke="#FBBC05" stroke-width="12" stroke-opacity="0.9"/>
-
-    <!-- Green branch at Foundation -->
-    <line x1="180" y1="325" x2="152" y2="395" stroke="#34A853" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="332" y1="325" x2="360" y2="395" stroke="#34A853" stroke-width="12" stroke-opacity="0.9"/>
-    <line x1="152" y1="395" x2="256" y2="395" stroke="#34A853" stroke-width="14" stroke-opacity="0.9"/>
-    <line x1="256" y1="395" x2="360" y2="395" stroke="#34A853" stroke-width="14" stroke-opacity="0.9"/>
+  <!-- 4-Corner Gradient Fill clipped to Home Assistant House -->
+  <g mask="url(#haHouseMask)">
+    <!-- Top Gradient (Blue -> Red) -->
+    <rect x="0" y="0" width="512" height="512" fill="url(#topRow)"/>
+    <!-- Bottom Gradient (Yellow -> Green) blended over top -->
+    <rect x="0" y="0" width="512" height="512" fill="url(#bottomRow)" mask="url(#verticalMask)"/>
   </g>
 
-  <!-- Network Nodes (The 4 Google Assistant Signature Circles + Junctions) -->
-  <!-- Junction Secondary Dots -->
-  <circle cx="180" cy="230" r="14" fill="#64748b"/>
-  <circle cx="332" cy="230" r="14" fill="#64748b"/>
-  <circle cx="180" cy="325" r="16" fill="#94a3b8"/>
-  <circle cx="332" cy="325" r="16" fill="#94a3b8"/>
-  <circle cx="152" cy="395" r="16" fill="#34A853"/>
-  <circle cx="360" cy="395" r="16" fill="#34A853"/>
-
-  <!-- 1. Google Blue Dot (Roof Apex) -->
-  <circle cx="256" cy="120" r="26" fill="#4285F4" filter="url(#glow)"/>
-  <circle cx="256" cy="120" r="14" fill="#ffffff" fill-opacity="0.3"/>
-
-  <!-- 2. Google Red Dot (Chimney Top) -->
-  <circle cx="350" cy="120" r="22" fill="#EA4335" filter="url(#glow)"/>
-  <circle cx="350" cy="120" r="11" fill="#ffffff" fill-opacity="0.3"/>
-
-  <!-- 3. Google Yellow Dot (Living Center Hub) -->
-  <circle cx="256" cy="260" r="28" fill="#FBBC05" filter="url(#glow)"/>
-  <circle cx="256" cy="260" r="15" fill="#ffffff" fill-opacity="0.3"/>
-
-  <!-- 4. Google Green Dot (Ground / Base Center) -->
-  <circle cx="256" cy="395" r="26" fill="#34A853" filter="url(#glow)"/>
-  <circle cx="256" cy="395" r="14" fill="#ffffff" fill-opacity="0.3"/>
+  <!-- Home Assistant White Network Lines and Nodes -->
+  <g transform="translate(25.6, 25.6) scale(3.84)">
+    <g transform="matrix(.938408 0 0 .93841 -5.688557 -13.572944)">
+      <g transform="matrix(1.598452 0 0 1.598452 -41.89164 -.937311)">
+        <path d="m70 89.6348-20-20M70 89.6348v-52M90 58.1348l-20 20" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="6.5"/>
+        <circle r="7.5" fill="#ffffff" transform="translate(50 69.634804)"/>
+        <circle r="7.5" fill="#ffffff" transform="translate(90 58.634798)"/>
+        <circle r="7.5" fill="#ffffff" transform="translate(70 37.6348)"/>
+      </g>
+    </g>
+  </g>
 </svg>
