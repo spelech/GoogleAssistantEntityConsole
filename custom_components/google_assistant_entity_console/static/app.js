@@ -39,6 +39,23 @@ const blocklistContainer = document.getElementById('blocklistContainer');
 const closeBlocklistModal = document.getElementById('closeBlocklistModal');
 const closeBlocklistModalBtn = document.getElementById('closeBlocklistModalBtn');
 
+// Listen for token updates from parent panel
+window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'HA_TOKEN_UPDATE' && event.data.token) {
+        sessionStorage.setItem('ha_token', event.data.token);
+    }
+});
+
+function requestParentToken() {
+    try {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'REQUEST_HA_TOKEN' }, '*');
+        }
+    } catch (e) {
+        console.debug('Failed to request token from parent window:', e);
+    }
+}
+
 // Get auth headers from URL token parameter or session storage
 function getAuthHeaders() {
     const params = new URLSearchParams(window.location.search);
@@ -57,6 +74,26 @@ function getAuthHeaders() {
     return {};
 }
 
+// Authenticated fetch wrapper that handles token injection and 401 refresh retry
+async function authFetch(url, options = {}) {
+    const headers = {
+        ...getAuthHeaders(),
+        ...(options.headers || {})
+    };
+    let response = await fetch(url, { ...options, headers });
+    if (response.status === 401) {
+        requestParentToken();
+        // Wait briefly for token update from parent
+        await new Promise(resolve => setTimeout(resolve, 300));
+        const retryHeaders = {
+            ...getAuthHeaders(),
+            ...(options.headers || {})
+        };
+        response = await fetch(url, { ...options, headers: retryHeaders });
+    }
+    return response;
+}
+
 // Init
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
@@ -72,7 +109,7 @@ if (document.readyState === 'loading') {
 async function fetchEntities() {
     showTableLoading();
     try {
-        const response = await fetch('/api/google_assistant_entity_console/entities', {
+        const response = await authFetch('/api/google_assistant_entity_console/entities', {
             headers: getAuthHeaders()
         });
         if (!response.ok) throw new Error('Failed to fetch entities');
@@ -137,6 +174,23 @@ function setupEventListeners() {
     
     // Rebuild Button
     if (rebuildBtn) rebuildBtn.addEventListener('click', handleRebuild);
+
+    // Copy Include Snippet Button
+    const copyIncludeBtn = document.getElementById('copyIncludeBtn');
+    if (copyIncludeBtn) {
+        copyIncludeBtn.addEventListener('click', () => {
+            const input = document.getElementById('missingIncludeInput');
+            if (input && input.value) {
+                navigator.clipboard.writeText(input.value).then(() => {
+                    showToast('Include snippet copied to clipboard!', 'success');
+                }).catch(() => {
+                    input.select();
+                    document.execCommand('copy');
+                    showToast('Include snippet copied to clipboard!', 'success');
+                });
+            }
+        });
+    }
     
     // Restart Modal controls
     if (cancelRestartBtn && restartModal) {
@@ -776,7 +830,7 @@ window.openQuickAliasModal = function(entityId, event) {
         const updatedAliases = [...entity.aliases, val];
         
         try {
-            const response = await fetch('/api/google_assistant_entity_console/entities/update', {
+            const response = await authFetch('/api/google_assistant_entity_console/entities/update', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -830,22 +884,33 @@ async function handleRebuild() {
     icon.className = 'fa-solid fa-spinner fa-spin';
     
     try {
-        const response = await fetch('/api/google_assistant_entity_console/rebuild', {
+        const result = await authFetch('/api/google_assistant_entity_console/rebuild', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                ...getAuthHeaders()
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({})
         });
         
-        if (!response.ok) {
-            const err = await response.json();
+        if (!result.ok) {
+            const err = await result.json();
             throw new Error(err.error || 'Rebuild failed');
         }
         
-        const result = await response.json();
-        showToast(`Configuration generated successfully. (${result.exposed_count} entities exposed)`, 'success');
+        const data = await result.json();
+        showToast(`Configuration generated successfully. (${data.exposed_count} entities exposed)`, 'success');
+
+        const missingIncludeContainer = document.getElementById('missingIncludeContainer');
+        const missingIncludeInput = document.getElementById('missingIncludeInput');
+        if (missingIncludeContainer && missingIncludeInput) {
+            if (data.has_include_directive === false && data.required_include) {
+                missingIncludeInput.value = data.required_include;
+                missingIncludeContainer.style.display = 'block';
+            } else {
+                missingIncludeContainer.style.display = 'none';
+            }
+        }
+
         // Open restart confirmation modal
         restartModal.style.display = 'block';
     } catch (error) {
@@ -863,7 +928,7 @@ async function handleRestart() {
     confirmRestartBtn.textContent = 'Restarting...';
     
     try {
-        const response = await fetch('/api/google_assistant_entity_console/restart', {
+        const response = await authFetch('/api/google_assistant_entity_console/restart', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -901,7 +966,7 @@ window.toggleExposeDirectly = async function(entityId, event) {
     const newExposeStatus = !entity.should_expose;
     
     try {
-        const response = await fetch('/api/google_assistant_entity_console/entities/update', {
+        const response = await authFetch('/api/google_assistant_entity_console/entities/update', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -936,7 +1001,7 @@ window.removeAliasDirectly = async function(entityId, alias, event) {
     const updatedAliases = (entity.aliases || []).filter(a => a !== alias);
     
     try {
-        const response = await fetch('/api/google_assistant_entity_console/entities/update', {
+        const response = await authFetch('/api/google_assistant_entity_console/entities/update', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1007,7 +1072,7 @@ window.openEditNameInline = function(entityId, event) {
             }
             
             try {
-                const response = await fetch('/api/google_assistant_entity_console/entities/update', {
+                const response = await authFetch('/api/google_assistant_entity_console/entities/update', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1073,7 +1138,7 @@ function showToast(message, type = 'success') {
 async function fetchBlocklist() {
     blocklistContainer.innerHTML = '<span style="color: var(--on-surface-variant); font-size: 0.9rem; font-style: italic;">Loading blocklist...</span>';
     try {
-        const response = await fetch('/api/google_assistant_entity_console/blocklist', {
+        const response = await authFetch('/api/google_assistant_entity_console/blocklist', {
             headers: getAuthHeaders()
         });
         if (!response.ok) throw new Error('Failed to fetch blocklist');
@@ -1116,7 +1181,7 @@ function renderBlocklist(patterns) {
 // Add a regex pattern to blocklist
 async function addBlocklistPattern(pattern) {
     try {
-        const response = await fetch('/api/google_assistant_entity_console/blocklist/add', {
+        const response = await authFetch('/api/google_assistant_entity_console/blocklist/add', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1143,7 +1208,7 @@ async function addBlocklistPattern(pattern) {
 async function removeBlocklistPattern(pattern) {
     try {
         // Fetch current list first
-        const getRes = await fetch('/api/google_assistant_entity_console/blocklist', {
+        const getRes = await authFetch('/api/google_assistant_entity_console/blocklist', {
             headers: getAuthHeaders()
         });
         if (!getRes.ok) throw new Error('Failed to load current list');
@@ -1151,7 +1216,7 @@ async function removeBlocklistPattern(pattern) {
         
         const updatedList = (getData.blocklist || []).filter(p => p !== pattern);
         
-        const response = await fetch('/api/google_assistant_entity_console/blocklist', {
+        const response = await authFetch('/api/google_assistant_entity_console/blocklist', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1185,7 +1250,7 @@ window.addToBlocklistDirectly = async function(entityId, event) {
     const pattern = `^${entityId.replace(/\./g, '\\.')}$`;
     
     try {
-        const response = await fetch('/api/google_assistant_entity_console/blocklist/add', {
+        const response = await authFetch('/api/google_assistant_entity_console/blocklist/add', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1220,7 +1285,7 @@ let aiSettings = {};
 
 async function loadAiSettings() {
     try {
-        const response = await fetch('/api/google_assistant_entity_console/ai/settings', {
+        const response = await authFetch('/api/google_assistant_entity_console/ai/settings', {
             headers: getAuthHeaders()
         });
         if (response.ok) {
@@ -1309,7 +1374,7 @@ function setupAiEventListeners() {
             queryModelsBtn.disabled = true;
             queryModelsBtn.textContent = 'Fetching...';
             try {
-                const response = await fetch('/api/google_assistant_entity_console/ai/models', {
+                const response = await authFetch('/api/google_assistant_entity_console/ai/models', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1368,7 +1433,7 @@ function setupAiEventListeners() {
             saveAiSettingsBtn.disabled = true;
             saveAiSettingsBtn.textContent = 'Saving...';
             try {
-                const response = await fetch('/api/google_assistant_entity_console/ai/settings', {
+                const response = await authFetch('/api/google_assistant_entity_console/ai/settings', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1427,7 +1492,7 @@ function setupAiEventListeners() {
             queryHaAgentsBtn.disabled = true;
             queryHaAgentsBtn.textContent = 'Fetching...';
             try {
-                const response = await fetch('/api/google_assistant_entity_console/ai/ha_agents', {
+                const response = await authFetch('/api/google_assistant_entity_console/ai/ha_agents', {
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) {
@@ -1487,7 +1552,7 @@ function setupAiEventListeners() {
             aiGenNicknamesBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right: 0.5rem;"></i> Generating...';
             
             try {
-                const response = await fetch('/api/google_assistant_entity_console/ai/generate_nicknames', {
+                const response = await authFetch('/api/google_assistant_entity_console/ai/generate_nicknames', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1555,7 +1620,7 @@ function setupAiEventListeners() {
             aiSuggestExposureBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right: 0.5rem;"></i> Analyzing...';
             
             try {
-                const response = await fetch('/api/google_assistant_entity_console/ai/suggest_exposure', {
+                const response = await authFetch('/api/google_assistant_entity_console/ai/suggest_exposure', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1704,7 +1769,7 @@ function getEntitiesInGroup(targetType, targetId) {
 // Helpers for Direct updates
 async function setExposureDirectly(entityId, newExposeStatus) {
     try {
-        const response = await fetch('/api/google_assistant_entity_console/entities/update', {
+        const response = await authFetch('/api/google_assistant_entity_console/entities/update', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1730,7 +1795,7 @@ async function setAliasesDirectly(entityId, aliases) {
     try {
         const entity = entities.find(e => e.entity_id === entityId);
         if (!entity) return false;
-        const response = await fetch('/api/google_assistant_entity_console/entities/update', {
+        const response = await authFetch('/api/google_assistant_entity_console/entities/update', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1765,7 +1830,7 @@ window.generateSingleEntityNickname = async function(entityId, event) {
     showToast(`AI suggesting nicknames for ${entity.display_name}...`, 'info');
     
     try {
-        const response = await fetch('/api/google_assistant_entity_console/ai/generate_single_nickname', {
+        const response = await authFetch('/api/google_assistant_entity_console/ai/generate_single_nickname', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
