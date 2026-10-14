@@ -152,7 +152,28 @@ async function fetchEntities() {
 
 // Event listeners setup
 function setupEventListeners() {
-    if (searchInput) searchInput.addEventListener('input', applyFilters);
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            const clearBtn = document.getElementById('clearSearchBtn');
+            if (clearBtn) {
+                clearBtn.style.display = searchInput.value ? 'flex' : 'none';
+            }
+            applyFilters();
+        });
+    }
+
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    if (clearSearchBtn) {
+        clearSearchBtn.addEventListener('click', () => {
+            if (searchInput) {
+                searchInput.value = '';
+                clearSearchBtn.style.display = 'none';
+                searchInput.focus();
+                applyFilters();
+            }
+        });
+    }
+
     if (roomFilter) roomFilter.addEventListener('change', applyFilters);
     if (exposedOnlyCheckbox) exposedOnlyCheckbox.addEventListener('change', applyFilters);
     if (groupingType) groupingType.addEventListener('change', applyFilters);
@@ -232,8 +253,33 @@ function setupEventListeners() {
 }
 
 function updateStats() {
-    totalEntitiesEl.textContent = entities.length;
-    exposedEntitiesEl.textContent = entities.filter(e => e.should_expose).length;
+    if (totalEntitiesEl) totalEntitiesEl.textContent = entities.length;
+    if (exposedEntitiesEl) exposedEntitiesEl.textContent = entities.filter(e => e.should_expose).length;
+
+    const pendingAdd = entities.filter(e => e.should_expose && !e.yaml_exposed).length;
+    const pendingRemove = entities.filter(e => !e.should_expose && e.yaml_exposed).length;
+    const pendingTotal = pendingAdd + pendingRemove;
+
+    const pendingEntitiesStat = document.getElementById('pendingEntitiesStat');
+    if (pendingEntitiesStat) pendingEntitiesStat.textContent = pendingTotal;
+
+    const pendingChangesBadge = document.getElementById('pendingChangesBadge');
+    if (pendingChangesBadge) {
+        if (pendingTotal > 0) {
+            pendingChangesBadge.style.display = 'inline-block';
+            pendingChangesBadge.textContent = `${pendingTotal} Pending`;
+        } else {
+            pendingChangesBadge.style.display = 'none';
+        }
+    }
+
+    if (rebuildBtn) {
+        if (pendingTotal > 0) {
+            rebuildBtn.classList.add('pulse-highlight');
+        } else {
+            rebuildBtn.classList.remove('pulse-highlight');
+        }
+    }
 }
 
 function populateRoomFilter(uniqueRooms) {
@@ -315,6 +361,15 @@ function applyFilters() {
         
         return matchesQuery && matchesDomain && matchesRoom && matchesExposed && matchesGroupedLights && matchesUnavailable;
     });
+
+    const matchCountEl = document.getElementById('filterMatchCount');
+    if (matchCountEl) {
+        if (!query && room === 'all' && !exposedOnly && selectedDomains.size === 0) {
+            matchCountEl.textContent = `${entities.length} items`;
+        } else {
+            matchCountEl.textContent = `${filteredEntities.length} of ${entities.length}`;
+        }
+    }
     
     renderTable();
 }
@@ -484,7 +539,8 @@ function renderTable() {
     if (filteredEntities.length === 0) {
         entityTableBody.innerHTML = `
             <tr>
-                <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 3rem 0;">
+                <td colspan="4" style="text-align: center; color: var(--on-surface-variant); padding: 3rem 0;">
+                    <i class="fa-solid fa-magnifying-glass" style="font-size: 1.5rem; opacity: 0.5; margin-bottom: 0.5rem; display: block;"></i>
                     No entities match the active filters.
                 </td>
             </tr>
@@ -495,6 +551,13 @@ function renderTable() {
     entityTableBody.innerHTML = '';
     
     const isDomainGrouping = (groupingType && groupingType.value === 'domain');
+    const isFlatGrouping = (groupingType && groupingType.value === 'flat');
+    
+    if (isFlatGrouping) {
+        const ents = [...filteredEntities].sort((a, b) => a.entity_id.localeCompare(b.entity_id));
+        ents.forEach(e => renderEntityRow(e));
+        return;
+    }
     
     if (isDomainGrouping) {
         // Group by Domain -> Floor & Room
@@ -702,6 +765,15 @@ function renderTable() {
     }
 }
 
+window.copyEntityId = function(entityId, event) {
+    if (event) event.stopPropagation();
+    navigator.clipboard.writeText(entityId).then(() => {
+        showToast(`Copied ${entityId}`, 'success');
+    }).catch(() => {
+        showToast(`Copied ${entityId}`, 'success');
+    });
+};
+
 function renderEntityRow(e) {
     const tr = document.createElement('tr');
     tr.className = 'entity-row';
@@ -711,9 +783,9 @@ function renderEntityRow(e) {
     
     // Aliases rendering with direct click-to-remove and inline "Add" button
     const aliasBadges = validAliases.map(a => `
-        <span class="badge alias-badge" style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.5rem;">
+        <span class="alias-badge">
             ${a}
-            <i class="fa-solid fa-xmark" onclick="removeAliasDirectly('${e.entity_id}', '${a.replace(/'/g, "\\'")}', event)" style="cursor: pointer; font-size: 0.75rem; color: var(--on-surface-variant); transition: color 0.15s;" onmouseover="this.style.color='var(--danger)'" onmouseout="this.style.color='var(--on-surface-variant)'" title="Remove nickname"></i>
+            <i class="fa-solid fa-xmark alias-delete-btn" onclick="removeAliasDirectly('${e.entity_id}', '${a.replace(/'/g, "\\'")}', event)" title="Remove nickname"></i>
         </span>
     `).join(' ');
     
@@ -724,43 +796,50 @@ function renderEntityRow(e) {
     // Expose status badge (directly togglable on click)
     let exposeBadge = '';
     if (e.yaml_exposed && e.should_expose) {
-        exposeBadge = `<span class="badge badge-exposed" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure"><i class="fa-solid fa-circle-check" style="margin-right: 0.3rem;"></i>Exposed</span>`;
+        exposeBadge = `<span class="badge badge-exposed" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure" style="cursor: pointer;"><i class="fa-solid fa-circle-check" style="margin-right: 0.3rem;"></i>Exposed</span>`;
     } else if (e.should_expose && !e.yaml_exposed) {
-        exposeBadge = `<span class="badge badge-pending-expose" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure"><i class="fa-solid fa-circle-pause" style="margin-right: 0.3rem;"></i>Pending Add</span>`;
+        exposeBadge = `<span class="badge badge-pending-expose" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure" style="cursor: pointer;"><i class="fa-solid fa-circle-pause" style="margin-right: 0.3rem;"></i>Pending Add</span>`;
     } else if (!e.should_expose && e.yaml_exposed) {
-        exposeBadge = `<span class="badge badge-pending-remove" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure"><i class="fa-solid fa-circle-minus" style="margin-right: 0.3rem;"></i>Pending Remove</span>`;
+        exposeBadge = `<span class="badge badge-pending-remove" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure" style="cursor: pointer;"><i class="fa-solid fa-circle-minus" style="margin-right: 0.3rem;"></i>Pending Remove</span>`;
     } else {
-        exposeBadge = `<span class="badge badge-not-exposed" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure">No</span>`;
+        exposeBadge = `<span class="badge badge-not-exposed" onclick="toggleExposeDirectly('${e.entity_id}', event)" title="Click to toggle exposure" style="cursor: pointer;">No</span>`;
     }
     
     tr.innerHTML = `
         <td>
             <div class="entity-info-wrapper">
-                <div class="entity-name-wrapper" style="display: inline-flex; align-items: center; gap: 0.4rem;">
-                    <i class="fa-solid ${getEntityIcon(e.domain)}" style="color: ${e.unavailable ? 'var(--on-surface-variant)' : 'var(--primary)'}; margin-right: 0.15rem; font-size: 0.95rem;"></i>
-                    <div class="entity-name"><strong>${e.display_name}</strong></div>
-                    ${e.unavailable ? '<span class="badge" style="background: rgba(220, 53, 69, 0.12); color: #e44c5a; font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.35rem; display: inline-flex; align-items: center; gap: 0.2rem; border-radius: 4px; border: 1px solid rgba(220, 53, 69, 0.25);" title="Entity is currently offline or unavailable in Home Assistant"><i class="fa-solid fa-circle-exclamation"></i>Unavailable</span>' : ''}
-                    <button class="inline-edit-name-btn" onclick="openEditNameInline('${e.entity_id}', event)" title="Rename Entity" style="background: none; border: none; cursor: pointer; font-size: 0.75rem; padding: 0.2rem;">
-                        <i class="fa-solid fa-pencil"></i>
-                    </button>
+                <div class="entity-icon-badge">
+                    <i class="fa-solid ${getEntityIcon(e.domain)}" style="color: ${e.unavailable ? 'var(--on-surface-variant)' : 'var(--primary)'};"></i>
                 </div>
-                <div class="entity-id-subtext">${e.entity_id}</div>
+                <div class="entity-text-block">
+                    <div class="entity-name-row">
+                        <span class="entity-name" title="${e.display_name}">${e.display_name}</span>
+                        ${e.unavailable ? '<span class="badge-unavailable" title="Offline / Unavailable in Home Assistant">Unavailable</span>' : ''}
+                        <button class="inline-edit-name-btn" onclick="openEditNameInline('${e.entity_id}', event)" title="Rename Entity" style="background: none; border: none; cursor: pointer; font-size: 0.75rem; padding: 0.15rem; color: var(--on-surface-variant);">
+                            <i class="fa-solid fa-pencil"></i>
+                        </button>
+                    </div>
+                    <div class="entity-id-row">
+                        <span class="entity-id-badge" onclick="copyEntityId('${e.entity_id}', event)" title="Click to copy entity ID">${e.entity_id}</span>
+                        ${e.area ? `<span style="font-size: 0.72rem; color: var(--on-surface-variant);"><i class="fa-solid fa-door-open" style="font-size: 0.65rem; margin-right: 0.2rem;"></i>${e.area}</span>` : ''}
+                    </div>
+                </div>
             </div>
         </td>
         <td class="inline-aliases-cell">
             <div class="aliases-wrapper">
                 <div class="aliases-badges-list">${aliasBadges || '<span class="no-aliases">None</span>'}</div>
                 <button class="inline-add-alias-btn" onclick="openQuickAliasModal('${e.entity_id}', event)" title="Add nickname">
-                    <i class="fa-solid fa-plus"></i>
+                    <i class="fa-solid fa-plus"></i> Add
                 </button>
-                <button class="inline-add-alias-btn ai-suggest-single-btn" onclick="generateSingleEntityNickname('${e.entity_id}', event)" title="AI Suggest Nicknames (Room-Aware)" style="color: var(--primary); margin-left: 0.25rem;">
+                <button class="ai-suggest-single-btn" onclick="generateSingleEntityNickname('${e.entity_id}', event)" title="AI Suggest Nicknames (Room-Aware)">
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
                 </button>
             </div>
         </td>
         <td style="text-align: center;">${exposeBadge}</td>
         <td class="action-cell">
-            <button class="action-btn" onclick="addToBlocklistDirectly('${e.entity_id}', event)" title="Block / Permanently Hide" style="color: var(--danger);">
+            <button class="action-btn" onclick="addToBlocklistDirectly('${e.entity_id}', event)" title="Block / Permanently Hide">
                 <i class="fa-solid fa-eye-slash"></i>
             </button>
         </td>

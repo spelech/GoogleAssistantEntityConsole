@@ -18,6 +18,14 @@ if (!customElements.get('google-assistant-entity-console-panel')) {
     }
 
     connectedCallback() {
+      this.style.display = 'block';
+      this.style.position = 'absolute';
+      this.style.top = '0';
+      this.style.left = '0';
+      this.style.width = '100%';
+      this.style.height = '100%';
+      this.style.overflow = 'hidden';
+      this.style.boxSizing = 'border-box';
       window.addEventListener('message', this._messageListener);
     }
 
@@ -37,6 +45,7 @@ if (!customElements.get('google-assistant-entity-console-panel')) {
         this._iframe.style.height = '100%';
         this._iframe.style.border = '0';
         this._iframe.style.display = 'block';
+        this._iframe.style.overflow = 'hidden';
         this.appendChild(this._iframe);
       }
       // Update the src only once
