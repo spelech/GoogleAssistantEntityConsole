@@ -4,6 +4,12 @@ let filteredEntities = [];
 let rooms = [];
 let currentAliases = [];
 const collapsedGroups = new Set();
+let activeFilters = {
+    exposure: 'all',
+    area: null,
+    domain: null
+};
+let sidebarCollapsed = localStorage.getItem('gaec_sidebar_collapsed') === 'true';
 
 // DOM Elements
 const totalEntitiesEl = document.getElementById('totalEntities');
@@ -11,6 +17,29 @@ const exposedEntitiesEl = document.getElementById('exposedEntities');
 const searchInput = document.getElementById('searchInput');
 const roomFilter = document.getElementById('roomFilter');
 const exposedOnlyCheckbox = document.getElementById('exposedOnlyCheckbox');
+
+// Slicing & Sidebar DOM Elements
+const appSidebar = document.getElementById('appSidebar');
+const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+const sidebarCollapseBtn = document.getElementById('sidebarCollapseBtn');
+const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+const sidebarFilterInput = document.getElementById('sidebarFilterInput');
+const exposureNav = document.getElementById('exposureNav');
+const areasNav = document.getElementById('areasNav');
+const domainsNav = document.getElementById('domainsNav');
+const countAllEl = document.getElementById('countAll');
+const countExposedEl = document.getElementById('countExposed');
+const countUnexposedEl = document.getElementById('countUnexposed');
+const countOverridesEl = document.getElementById('countOverrides');
+const areasCountBadge = document.getElementById('areasCountBadge');
+const domainsCountBadge = document.getElementById('domainsCountBadge');
+const breadcrumbContainer = document.getElementById('breadcrumbContainer');
+const breadcrumbSliceText = document.getElementById('breadcrumbSliceText');
+const breadcrumbChips = document.getElementById('breadcrumbChips');
+const clearSliceBtn = document.getElementById('clearSliceBtn');
+const sliceBulkActionBtn = document.getElementById('sliceBulkActionBtn');
+const sliceBulkActionText = document.getElementById('sliceBulkActionText');
+const regexIndicator = document.getElementById('regexIndicator');
 
 // Advanced Filters DOM & State
 const toggleAdvancedFiltersBtn = document.getElementById('toggleAdvancedFiltersBtn');
@@ -178,6 +207,29 @@ function setupEventListeners() {
     if (exposedOnlyCheckbox) exposedOnlyCheckbox.addEventListener('change', applyFilters);
     if (groupingType) groupingType.addEventListener('change', applyFilters);
     
+    // Sidebar & Slicing Event Listeners
+    if (sidebarToggleBtn) {
+        sidebarToggleBtn.addEventListener('click', () => toggleSidebar());
+    }
+    if (sidebarCollapseBtn) {
+        sidebarCollapseBtn.addEventListener('click', () => toggleSidebar(true));
+    }
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', () => toggleSidebar(true));
+    }
+    if (sidebarFilterInput) {
+        sidebarFilterInput.addEventListener('input', () => renderSidebar());
+    }
+    if (clearSliceBtn) {
+        clearSliceBtn.addEventListener('click', clearAllFilters);
+    }
+    if (sliceBulkActionBtn) {
+        sliceBulkActionBtn.addEventListener('click', handleSliceBulkAction);
+    }
+    if (sidebarCollapsed && appSidebar) {
+        appSidebar.classList.add('collapsed');
+    }
+
     // Advanced Filters Event Listeners
     if (toggleAdvancedFiltersBtn && advancedFiltersDrawer) {
         toggleAdvancedFiltersBtn.addEventListener('click', () => {
@@ -252,6 +304,16 @@ function setupEventListeners() {
     setupAiEventListeners();
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function updateStats() {
     if (totalEntitiesEl) totalEntitiesEl.textContent = entities.length;
     if (exposedEntitiesEl) exposedEntitiesEl.textContent = entities.filter(e => e.should_expose).length;
@@ -280,6 +342,309 @@ function updateStats() {
             rebuildBtn.classList.remove('pulse-highlight');
         }
     }
+
+    renderSidebar();
+}
+
+function parseSearchQuery(query) {
+    const specifiers = {
+        exposure: null,
+        area: null,
+        domain: null,
+        floor: null
+    };
+    
+    let text = (query || '').trim();
+
+    // Match is:exposed, is:unexposed, not:exposed, is:override, has:alias
+    text = text.replace(/\b(?:is|status):(exposed|unexposed|override|overrides|alias|aliases)\b/gi, (match, val) => {
+        const v = val.toLowerCase();
+        if (v === 'exposed') specifiers.exposure = 'exposed';
+        else if (v === 'unexposed') specifiers.exposure = 'unexposed';
+        else if (v.startsWith('override') || v.startsWith('alias')) specifiers.exposure = 'overrides';
+        return '';
+    });
+
+    text = text.replace(/\bnot:exposed\b/gi, () => {
+        specifiers.exposure = 'unexposed';
+        return '';
+    });
+
+    text = text.replace(/\bhas:(?:alias|aliases|override|overrides)\b/gi, () => {
+        specifiers.exposure = 'overrides';
+        return '';
+    });
+
+    // Match area:"Living Room" or area:basement
+    text = text.replace(/\barea:(?:"([^"]+)"|(\S+))/gi, (match, p1, p2) => {
+        specifiers.area = (p1 || p2).toLowerCase();
+        return '';
+    });
+
+    // Match domain:light
+    text = text.replace(/\bdomain:(?:"([^"]+)"|(\S+))/gi, (match, p1, p2) => {
+        specifiers.domain = (p1 || p2).toLowerCase();
+        return '';
+    });
+
+    // Match floor:"Main Floor" or floor:basement
+    text = text.replace(/\bfloor:(?:"([^"]+)"|(\S+))/gi, (match, p1, p2) => {
+        specifiers.floor = (p1 || p2).toLowerCase();
+        return '';
+    });
+
+    return {
+        specifiers,
+        remainingQuery: text.replace(/\s+/g, ' ').trim()
+    };
+}
+
+function renderSidebar() {
+    if (!exposureNav || !areasNav || !domainsNav) return;
+
+    // Filter term for sidebar categories search
+    const filterTerm = sidebarFilterInput ? sidebarFilterInput.value.toLowerCase().trim() : '';
+
+    // 1. Exposure counts
+    const totalCount = entities.length;
+    const exposedCount = entities.filter(e => e.should_expose || e.yaml_exposed).length;
+    const unexposedCount = totalCount - exposedCount;
+    const overridesCount = entities.filter(e => (e.aliases && e.aliases.length > 0) || (e.display_name && e.display_name !== e.original_name)).length;
+
+    if (countAllEl) countAllEl.textContent = totalCount;
+    if (countExposedEl) countExposedEl.textContent = exposedCount;
+    if (countUnexposedEl) countUnexposedEl.textContent = unexposedCount;
+    if (countOverridesEl) countOverridesEl.textContent = overridesCount;
+
+    // 2. Areas section
+    const areaMap = new Map();
+    let unassignedAreaCount = 0;
+    entities.forEach(e => {
+        const a = (e.area || '').trim();
+        if (!a || a === 'TBA' || a === 'No Room') {
+            unassignedAreaCount++;
+        } else {
+            areaMap.set(a, (areaMap.get(a) || 0) + 1);
+        }
+    });
+
+    const sortedAreas = [...areaMap.keys()].sort((a, b) => a.localeCompare(b));
+    if (areasCountBadge) areasCountBadge.textContent = sortedAreas.length + (unassignedAreaCount > 0 ? 1 : 0);
+
+    areasNav.innerHTML = '';
+    sortedAreas.forEach(areaName => {
+        if (filterTerm && !areaName.toLowerCase().includes(filterTerm)) return;
+        const count = areaMap.get(areaName);
+        const item = document.createElement('div');
+        const isActive = activeFilters.area && activeFilters.area.toLowerCase() === areaName.toLowerCase();
+        item.className = `sidebar-item ${isActive ? 'active' : ''}`;
+        item.dataset.filterType = 'area';
+        item.dataset.filterValue = areaName;
+        item.innerHTML = `
+            <span class="sidebar-item-label"><i class="fa-solid fa-door-open"></i> ${escapeHtml(areaName)}</span>
+            <span class="sidebar-item-count">${count}</span>
+        `;
+        item.addEventListener('click', () => setFilter('area', areaName));
+        areasNav.appendChild(item);
+    });
+
+    if (unassignedAreaCount > 0 && (!filterTerm || 'unassigned area'.includes(filterTerm) || 'no room'.includes(filterTerm))) {
+        const item = document.createElement('div');
+        const isActive = activeFilters.area === '__unassigned__';
+        item.className = `sidebar-item ${isActive ? 'active' : ''}`;
+        item.dataset.filterType = 'area';
+        item.dataset.filterValue = '__unassigned__';
+        item.innerHTML = `
+            <span class="sidebar-item-label"><i class="fa-solid fa-question text-muted"></i> <em>Unassigned Area</em></span>
+            <span class="sidebar-item-count">${unassignedAreaCount}</span>
+        `;
+        item.addEventListener('click', () => setFilter('area', '__unassigned__'));
+        areasNav.appendChild(item);
+    }
+
+    // 3. Domains section
+    const domainMap = new Map();
+    entities.forEach(e => {
+        const d = (e.domain || 'other').trim();
+        domainMap.set(d, (domainMap.get(d) || 0) + 1);
+    });
+
+    const sortedDomains = [...domainMap.keys()].sort((a, b) => domainMap.get(b) - domainMap.get(a));
+    if (domainsCountBadge) domainsCountBadge.textContent = sortedDomains.length;
+
+    domainsNav.innerHTML = '';
+    sortedDomains.forEach(domain => {
+        const domainFriendly = getDomainName(domain);
+        if (filterTerm && !domain.toLowerCase().includes(filterTerm) && !domainFriendly.toLowerCase().includes(filterTerm)) return;
+        const count = domainMap.get(domain);
+        const item = document.createElement('div');
+        const isActive = activeFilters.domain && activeFilters.domain.toLowerCase() === domain.toLowerCase();
+        item.className = `sidebar-item ${isActive ? 'active' : ''}`;
+        item.dataset.filterType = 'domain';
+        item.dataset.filterValue = domain;
+        item.innerHTML = `
+            <span class="sidebar-item-label"><i class="fa-solid ${getEntityIcon(domain)}"></i> ${escapeHtml(domainFriendly)}</span>
+            <span class="sidebar-item-count">${count}</span>
+        `;
+        item.addEventListener('click', () => setFilter('domain', domain));
+        domainsNav.appendChild(item);
+    });
+
+    // 4. Sync active classes on exposureNav items
+    if (exposureNav) {
+        const items = exposureNav.querySelectorAll('.sidebar-item');
+        items.forEach(el => {
+            const val = el.dataset.sliceValue;
+            if (activeFilters.exposure === val) {
+                el.classList.add('active');
+            } else {
+                el.classList.remove('active');
+            }
+            if (!el.onclick) {
+                el.onclick = () => {
+                    setFilter('exposure', val);
+                };
+            }
+        });
+    }
+
+    updateBreadcrumbs();
+}
+
+function setFilter(type, value) {
+    if (type === 'exposure') {
+        activeFilters.exposure = (activeFilters.exposure === value) ? 'all' : value;
+    } else if (type === 'area') {
+        activeFilters.area = (activeFilters.area === value) ? null : value;
+    } else if (type === 'domain') {
+        activeFilters.domain = (activeFilters.domain === value) ? null : value;
+    }
+
+    updateBreadcrumbs();
+    renderSidebar();
+
+    // On mobile, close sidebar drawer upon selecting
+    if (window.innerWidth <= 768 && appSidebar && !appSidebar.classList.contains('collapsed')) {
+        toggleSidebar(true);
+    }
+
+    applyFilters();
+}
+
+window.setFilter = setFilter;
+
+function clearAllFilters() {
+    activeFilters = {
+        exposure: 'all',
+        area: null,
+        domain: null
+    };
+    if (searchInput) searchInput.value = '';
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    if (clearSearchBtn) clearSearchBtn.style.display = 'none';
+
+    updateBreadcrumbs();
+    renderSidebar();
+    applyFilters();
+}
+
+function updateBreadcrumbs() {
+    if (!breadcrumbContainer || !breadcrumbSliceText || !breadcrumbChips) return;
+    
+    const chips = [];
+    if (activeFilters.exposure !== 'all') {
+        let label = 'Exposed';
+        if (activeFilters.exposure === 'unexposed') label = 'Not Exposed';
+        else if (activeFilters.exposure === 'overrides') label = 'Custom Overrides';
+        chips.push({
+            type: 'exposure',
+            html: `<strong>Exposure:</strong> ${escapeHtml(label)}`
+        });
+    }
+    if (activeFilters.area) {
+        const areaLabel = activeFilters.area === '__unassigned__' ? 'Unassigned' : activeFilters.area;
+        chips.push({
+            type: 'area',
+            html: `<strong>Area:</strong> ${escapeHtml(areaLabel)}`
+        });
+    }
+    if (activeFilters.domain) {
+        chips.push({
+            type: 'domain',
+            html: `<strong>Domain:</strong> ${escapeHtml(getDomainName(activeFilters.domain))}`
+        });
+    }
+
+    if (chips.length === 0) {
+        breadcrumbSliceText.style.display = 'inline';
+        breadcrumbSliceText.textContent = `All Entities (${entities.length} items)`;
+        breadcrumbChips.style.display = 'none';
+        breadcrumbChips.innerHTML = '';
+        if (clearSliceBtn) clearSliceBtn.style.display = 'none';
+        if (sliceBulkActionBtn) sliceBulkActionBtn.style.display = 'none';
+    } else {
+        breadcrumbSliceText.style.display = 'none';
+        breadcrumbChips.style.display = 'flex';
+        breadcrumbChips.innerHTML = '';
+        chips.forEach(c => {
+            const chipEl = document.createElement('div');
+            chipEl.className = 'filter-chip breadcrumb-chip';
+            chipEl.dataset.filterType = c.type;
+            chipEl.innerHTML = `${c.html} <span class="chip-remove" title="Remove filter">&times;</span>`;
+            chipEl.querySelector('.chip-remove').addEventListener('click', (e) => {
+                e.stopPropagation();
+                setFilter(c.type, c.type === 'exposure' ? 'all' : null);
+            });
+            breadcrumbChips.appendChild(chipEl);
+        });
+        if (clearSliceBtn) clearSliceBtn.style.display = 'inline-flex';
+        if (sliceBulkActionBtn) sliceBulkActionBtn.style.display = 'inline-flex';
+    }
+}
+
+function toggleSidebar(forceCollapse) {
+    if (!appSidebar) return;
+    const shouldCollapse = forceCollapse !== undefined ? forceCollapse : !appSidebar.classList.contains('collapsed');
+    appSidebar.classList.toggle('collapsed', shouldCollapse);
+    if (sidebarBackdrop) {
+        sidebarBackdrop.classList.toggle('active', !shouldCollapse && window.innerWidth <= 768);
+    }
+    localStorage.setItem('gaec_sidebar_collapsed', shouldCollapse);
+}
+
+async function handleSliceBulkAction() {
+    if (filteredEntities.length === 0) return;
+    
+    const exposedInView = filteredEntities.filter(e => e.should_expose || e.yaml_exposed).length;
+    const willExpose = exposedInView < filteredEntities.length / 2;
+    const actionWord = willExpose ? 'Expose' : 'Unexpose';
+    
+    if (!confirm(`${actionWord} all ${filteredEntities.length} entities in the active filter?`)) {
+        return;
+    }
+
+    showToast(`${actionWord}ing ${filteredEntities.length} entities...`, 'info');
+    let updated = 0;
+    for (const entity of filteredEntities) {
+        try {
+            const currentExposed = !!(entity.should_expose || entity.yaml_exposed);
+            if (currentExposed !== willExpose) {
+                entity.should_expose = willExpose;
+                await authFetch(`/api/google_assistant_entity_console/entities/${encodeURIComponent(entity.entity_id)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ expose: willExpose })
+                });
+                updated++;
+            }
+        } catch (err) {
+            console.error('Failed to update entity in filter:', entity.entity_id, err);
+        }
+    }
+
+    showToast(`Successfully updated ${updated} entities`, 'success');
+    updateStats();
+    applyFilters();
 }
 
 function populateRoomFilter(uniqueRooms) {
@@ -331,43 +696,139 @@ function showTableLoading() {
 
 // Filter and render table
 function applyFilters() {
-    const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    const rawSearchText = searchInput ? searchInput.value : '';
+    const { specifiers, remainingQuery } = parseSearchQuery(rawSearchText);
+
+    let regex = null;
+    let isRegexActive = false;
+    
+    if (remainingQuery) {
+        try {
+            regex = new RegExp(remainingQuery, 'i');
+            isRegexActive = true;
+        } catch (e) {
+            // Graceful fallback to substring search if invalid regex
+            regex = null;
+            isRegexActive = false;
+        }
+    }
+
+    if (regexIndicator) {
+        if (remainingQuery && isRegexActive) {
+            regexIndicator.style.display = 'inline-flex';
+            regexIndicator.title = 'Regex pattern active';
+        } else {
+            regexIndicator.style.display = 'none';
+        }
+    }
+
     const room = roomFilter ? roomFilter.value : 'all';
     const exposedOnly = exposedOnlyCheckbox ? exposedOnlyCheckbox.checked : false;
     const hideGroupedLights = hideGroupedLightsCheckbox ? hideGroupedLightsCheckbox.checked : false;
     const hideUnavailable = hideUnavailableCheckbox ? hideUnavailableCheckbox.checked : false;
-    
+
+    // Combined effective exposure filter
+    const effectiveExposure = specifiers.exposure || (activeFilters.exposure !== 'all' ? activeFilters.exposure : null);
+
+    // Combined effective area filter
+    const effectiveArea = specifiers.area || (activeFilters.area ? activeFilters.area.toLowerCase() : null);
+
+    // Combined effective domain filter
+    const effectiveDomain = specifiers.domain || (activeFilters.domain ? activeFilters.domain.toLowerCase() : null);
+
     filteredEntities = entities.filter(e => {
-        // Query match
-        const matchesQuery = !query || 
-            e.entity_id.toLowerCase().includes(query) || 
-            (e.display_name || '').toLowerCase().includes(query) || 
-            (e.aliases || []).some(a => a && typeof a === 'string' && a.toLowerCase().includes(query));
-            
-        // Domain match (Multi-select)
-        const matchesDomain = selectedDomains.size === 0 || selectedDomains.has(e.domain);
-        
-        // Room match
+        // 1. Exposure filter (from sidebar OR search specifier is:exposed / not:exposed / is:override)
+        if (effectiveExposure) {
+            if (effectiveExposure === 'exposed' && !(e.should_expose || e.yaml_exposed)) return false;
+            if (effectiveExposure === 'unexposed' && (e.should_expose || e.yaml_exposed)) return false;
+            if (effectiveExposure === 'overrides') {
+                const hasOverrides = (e.aliases && e.aliases.length > 0) || (e.display_name && e.display_name !== e.original_name);
+                if (!hasOverrides) return false;
+            }
+        }
+
+        // 2. Area filter (from sidebar OR search specifier area:basement)
+        if (effectiveArea) {
+            if (effectiveArea === '__unassigned__') {
+                const isUnassigned = !e.area || e.area === 'TBA' || e.area === 'No Room';
+                if (!isUnassigned) return false;
+            } else {
+                const entityArea = (e.area || '').toLowerCase();
+                if (!entityArea.includes(effectiveArea)) return false;
+            }
+        }
+
+        // 3. Domain filter (from sidebar OR search specifier domain:light)
+        if (effectiveDomain) {
+            const entityDomain = (e.domain || '').toLowerCase();
+            if (entityDomain !== effectiveDomain) return false;
+        }
+
+        // 4. Floor filter (from search specifier floor:main)
+        if (specifiers.floor) {
+            const entityFloor = (e.floor || '').toLowerCase();
+            if (!entityFloor.includes(specifiers.floor)) return false;
+        }
+
+        // 5. Remaining text or regex match across friendly name, entity_id, google name, aliases, area
+        if (remainingQuery) {
+            const targets = [
+                e.entity_id || '',
+                e.display_name || '',
+                e.original_name || e.name || '',
+                e.area || '',
+                ...(e.aliases || []).filter(a => typeof a === 'string')
+            ];
+            const matchesQuery = regex 
+                ? targets.some(t => regex.test(t))
+                : targets.some(t => t.toLowerCase().includes(remainingQuery.toLowerCase()));
+            if (!matchesQuery) return false;
+        }
+
+        // 6. Domain chip filter (Multi-select)
+        const matchesDomainChips = selectedDomains.size === 0 || selectedDomains.has(e.domain);
+        if (!matchesDomainChips) return false;
+
+        // 7. Room dropdown filter
         const matchesRoom = room === 'all' || (e.area || '').toLowerCase() === room;
-        
-        // Exposed match (either marked in registry or currently exposed in YAML)
-        const matchesExposed = !exposedOnly || e.should_expose || e.yaml_exposed;
-        
-        // Hide Grouped Lights match
+        if (!matchesRoom) return false;
+
+        // 8. Exposed Only toggle
+        const matchesExposedOnly = !exposedOnly || e.should_expose || e.yaml_exposed;
+        if (!matchesExposedOnly) return false;
+
+        // 9. Grouped lights filter
         const matchesGroupedLights = !hideGroupedLights || e.domain !== 'light' || !e.in_group;
-        
-        // Hide Unavailable match
+        if (!matchesGroupedLights) return false;
+
+        // 10. Unavailable filter
         const matchesUnavailable = !hideUnavailable || !e.unavailable;
-        
-        return matchesQuery && matchesDomain && matchesRoom && matchesExposed && matchesGroupedLights && matchesUnavailable;
+        if (!matchesUnavailable) return false;
+
+        return true;
     });
 
+    // Update match count badge
     const matchCountEl = document.getElementById('filterMatchCount');
     if (matchCountEl) {
-        if (!query && room === 'all' && !exposedOnly && selectedDomains.size === 0) {
+        const isDefaultState = !rawSearchText && room === 'all' && !exposedOnly && selectedDomains.size === 0 
+            && activeFilters.exposure === 'all' && !activeFilters.area && !activeFilters.domain;
+        if (isDefaultState) {
             matchCountEl.textContent = `${entities.length} items`;
         } else {
             matchCountEl.textContent = `${filteredEntities.length} of ${entities.length}`;
+        }
+    }
+
+    // Update bulk action text
+    const hasActiveFilters = activeFilters.exposure !== 'all' || !!activeFilters.area || !!activeFilters.domain || !!specifiers.exposure || !!specifiers.area;
+    if (sliceBulkActionBtn) {
+        if (hasActiveFilters && filteredEntities.length > 0) {
+            const exposedInView = filteredEntities.filter(e => e.should_expose || e.yaml_exposed).length;
+            const willExpose = exposedInView < filteredEntities.length / 2;
+            if (sliceBulkActionText) {
+                sliceBulkActionText.textContent = `${willExpose ? 'Expose' : 'Unexpose'} All in Filter (${filteredEntities.length})`;
+            }
         }
     }
     

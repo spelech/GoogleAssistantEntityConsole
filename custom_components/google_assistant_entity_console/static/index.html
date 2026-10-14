@@ -21,14 +21,19 @@
     <div class="app-container">
         <!-- Header -->
         <header class="app-header">
-            <div class="logo">
-                <img src="/google_assistant_entity_console/static/logo.png" alt="Google Assistant Entity Console Logo">
-                <div class="logo-text">
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <h1>Google Assistant</h1>
-                        <span id="pendingChangesBadge" class="badge-pending-header" style="display: none;">0 Pending</span>
+            <div class="header-left">
+                <button id="sidebarToggleBtn" class="btn-sidebar-toggle" title="Toggle Filters Sidebar">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <div class="logo">
+                    <img src="/google_assistant_entity_console/static/logo.png" alt="Google Assistant Entity Console Logo">
+                    <div class="logo-text">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <h1>Google Assistant</h1>
+                            <span id="pendingChangesBadge" class="badge-pending-header" style="display: none;">0 Pending</span>
+                        </div>
+                        <span id="appVersion">Entity Console</span>
                     </div>
-                    <span id="appVersion">Entity Console</span>
                 </div>
             </div>
             <div class="header-actions">
@@ -47,129 +52,217 @@
             </div>
         </header>
 
-        <!-- KPI Stats Ribbon -->
-        <section class="stats-container">
-            <div class="stat-card">
-                <div class="stat-icon"><i class="fa-solid fa-list-check"></i></div>
-                <div class="stat-content">
-                    <span class="stat-label">Total Entities</span>
-                    <h2 id="totalEntities">0</h2>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon success"><i class="fa-solid fa-cloud-arrow-up"></i></div>
-                <div class="stat-content">
-                    <span class="stat-label">Exposed to Google</span>
-                    <h2 id="exposedEntities">0</h2>
-                </div>
-            </div>
-            <div class="stat-card" id="pendingStatCard">
-                <div class="stat-icon warning"><i class="fa-solid fa-clock-rotate-left"></i></div>
-                <div class="stat-content">
-                    <span class="stat-label">Pending Sync</span>
-                    <h2 id="pendingEntitiesStat">0</h2>
-                </div>
-            </div>
-            <div class="stat-card config-card">
-                <div class="stat-icon info"><i class="fa-solid fa-file-code"></i></div>
-                <div class="stat-content">
-                    <span class="stat-label">Active YAML Config</span>
-                    <h2 id="configFile">Loading...</h2>
-                </div>
-            </div>
-        </section>
+        <!-- 2-Pane App Layout -->
+        <div class="app-layout" id="appLayout">
+            <!-- Backdrop scrim for mobile drawer -->
+            <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
-        <!-- Sticky Controls Toolbar -->
-        <section class="controls-container">
-            <div class="controls-primary-row">
-                <div class="search-box">
-                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                    <input type="text" id="searchInput" placeholder="Search by entity name, ID, or nickname..." autocomplete="off">
-                    <button id="clearSearchBtn" class="clear-search-btn" title="Clear search" style="display: none;">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                    <span id="filterMatchCount" class="match-count-badge"></span>
-                </div>
-                <div class="filters-group">
-                    <div class="select-wrapper">
-                        <i class="fa-solid fa-door-open select-icon"></i>
-                        <select id="roomFilter" class="filter-select">
-                            <option value="all">All Rooms</option>
-                        </select>
-                    </div>
-                    <div class="select-wrapper">
-                        <i class="fa-solid fa-layer-group select-icon"></i>
-                        <select id="groupingType" class="filter-select">
-                            <option value="location">Floor & Room</option>
-                            <option value="domain">Domain</option>
-                            <option value="flat">No Grouping</option>
-                        </select>
-                    </div>
-                    <div class="toggle-pill">
-                        <label class="switch-toggle">
-                            <input type="checkbox" id="exposedOnlyCheckbox">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="toggle-label">Exposed Only</span>
-                    </div>
-                    <button id="toggleAdvancedFiltersBtn" class="btn btn-secondary btn-icon-text">
-                        <i class="fa-solid fa-sliders"></i>
-                        <span>Filters</span>
-                        <span id="activeFilterBadge" class="filter-badge" style="display: none;">0</span>
+            <!-- Left Slicing Sidebar -->
+            <aside class="app-sidebar" id="appSidebar">
+                <div class="sidebar-header">
+                    <span class="sidebar-title"><i class="fa-solid fa-filter"></i> Filters & Slices</span>
+                    <button id="sidebarCollapseBtn" class="sidebar-collapse-btn" title="Collapse sidebar">
+                        <i class="fa-solid fa-chevron-left"></i>
                     </button>
                 </div>
-            </div>
-            
-            <!-- Collapsible Advanced Filters Drawer -->
-            <div id="advancedFiltersDrawer" class="advanced-filters-drawer" style="display: none;">
-                <div class="advanced-filters-toggles">
-                    <div class="toggle-pill">
-                        <label class="switch-toggle">
-                            <input type="checkbox" id="hideGroupedLightsCheckbox">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="toggle-label">Hide Grouped Lights</span>
-                    </div>
-                    <div class="toggle-pill">
-                        <label class="switch-toggle">
-                            <input type="checkbox" id="hideUnavailableCheckbox">
-                            <span class="slider"></span>
-                        </label>
-                        <span class="toggle-label">Hide Unavailable</span>
-                    </div>
+                <div class="sidebar-search-container">
+                    <i class="fa-solid fa-magnifying-glass sidebar-search-icon"></i>
+                    <input type="text" id="sidebarFilterInput" placeholder="Filter categories..." autocomplete="off">
                 </div>
-                <div class="domain-filters-section">
-                    <div class="domain-filters-header">
-                        <span class="section-title">Include Domains / Types</span>
+                <div class="sidebar-nav-scroll" id="sidebarNavScroll">
+                    <!-- Exposure State Section -->
+                    <div class="sidebar-section">
+                        <div class="sidebar-section-title">Exposure State</div>
+                        <div class="sidebar-items" id="exposureNav">
+                            <div class="sidebar-item active" data-slice-type="all" data-slice-value="all">
+                                <span class="sidebar-item-label"><i class="fa-solid fa-globe"></i> All Entities</span>
+                                <span class="sidebar-item-count" id="countAll">0</span>
+                            </div>
+                            <div class="sidebar-item" data-slice-type="exposure" data-slice-value="exposed">
+                                <span class="sidebar-item-label"><i class="fa-solid fa-circle-check text-success"></i> Exposed to Google</span>
+                                <span class="sidebar-item-count badge-success" id="countExposed">0</span>
+                            </div>
+                            <div class="sidebar-item" data-slice-type="exposure" data-slice-value="unexposed">
+                                <span class="sidebar-item-label"><i class="fa-solid fa-circle-xmark text-muted"></i> Not Exposed</span>
+                                <span class="sidebar-item-count" id="countUnexposed">0</span>
+                            </div>
+                            <div class="sidebar-item" data-slice-type="exposure" data-slice-value="overrides">
+                                <span class="sidebar-item-label"><i class="fa-solid fa-tag text-accent"></i> Custom Overrides</span>
+                                <span class="sidebar-item-count badge-accent" id="countOverrides">0</span>
+                            </div>
+                        </div>
                     </div>
-                    <div id="domainChipsContainer" class="domain-chips-container">
-                        <!-- Rendered dynamically as active/inactive chips -->
-                    </div>
-                </div>
-            </div>
-        </section>
 
-        <!-- Main Content (Scrollable Data Grid) -->
-        <main class="table-container" id="tableContainer">
-            <table id="entityTable">
-                <thead>
-                    <tr>
-                        <th style="width: 40%;">Entity</th>
-                        <th style="width: 35%;">Nicknames / Aliases</th>
-                        <th style="width: 15%; text-align: center;">Exposed Status</th>
-                        <th style="width: 10%; text-align: center;">Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="entityTableBody">
-                    <tr>
-                        <td colspan="4" class="loading-state">
-                            <div class="spinner"></div>
-                            <span>Loading Home Assistant registry...</span>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </main>
+                    <!-- Areas Section -->
+                    <div class="sidebar-section">
+                        <div class="sidebar-section-header">
+                            <span class="sidebar-section-title">Areas / Rooms</span>
+                            <span class="sidebar-section-badge" id="areasCountBadge">0</span>
+                        </div>
+                        <div class="sidebar-items" id="areasNav">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Domains Section -->
+                    <div class="sidebar-section">
+                        <div class="sidebar-section-header">
+                            <span class="sidebar-section-title">Domains</span>
+                            <span class="sidebar-section-badge" id="domainsCountBadge">0</span>
+                        </div>
+                        <div class="sidebar-items" id="domainsNav">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Content Pane -->
+            <div class="main-content-pane" id="mainContentPane">
+                <!-- KPI Stats Ribbon -->
+                <section class="stats-container">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fa-solid fa-list-check"></i></div>
+                        <div class="stat-content">
+                            <span class="stat-label">Total Entities</span>
+                            <h2 id="totalEntities">0</h2>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon success"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                        <div class="stat-content">
+                            <span class="stat-label">Exposed to Google</span>
+                            <h2 id="exposedEntities">0</h2>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="pendingStatCard">
+                        <div class="stat-icon warning"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                        <div class="stat-content">
+                            <span class="stat-label">Pending Sync</span>
+                            <h2 id="pendingEntitiesStat">0</h2>
+                        </div>
+                    </div>
+                    <div class="stat-card config-card">
+                        <div class="stat-icon info"><i class="fa-solid fa-file-code"></i></div>
+                        <div class="stat-content">
+                            <span class="stat-label">Active YAML Config</span>
+                            <h2 id="configFile">Loading...</h2>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Slicing Breadcrumb Bar -->
+                <section class="breadcrumb-container" id="breadcrumbContainer">
+                    <div class="breadcrumb-left">
+                        <i class="fa-solid fa-layer-group breadcrumb-icon"></i>
+                        <span id="breadcrumbSliceText" class="breadcrumb-text">All Entities</span>
+                        <div id="breadcrumbChips" class="breadcrumb-chips-list" style="display: none;"></div>
+                        <button id="clearSliceBtn" class="clear-slice-btn" title="Reset all filters" style="display: none;">
+                            <i class="fa-solid fa-xmark"></i> Clear All
+                        </button>
+                    </div>
+                    <div class="breadcrumb-right">
+                        <button id="sliceBulkActionBtn" class="btn btn-secondary btn-sm" style="display: none;">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span id="sliceBulkActionText">Expose All in Filter</span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Sticky Controls Toolbar -->
+                <section class="controls-container">
+                    <div class="controls-primary-row">
+                        <div class="search-box">
+                            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                            <input type="text" id="searchInput" placeholder="Search name, ID, alias (regex or not:exposed area:basement)..." autocomplete="off">
+                            <span id="regexIndicator" class="regex-indicator" title="Regex search active" style="display: none;">.*</span>
+                            <button id="clearSearchBtn" class="clear-search-btn" title="Clear search" style="display: none;">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                            <span id="filterMatchCount" class="match-count-badge"></span>
+                        </div>
+                        <div class="filters-group">
+                            <div class="select-wrapper">
+                                <i class="fa-solid fa-door-open select-icon"></i>
+                                <select id="roomFilter" class="filter-select">
+                                    <option value="all">All Rooms</option>
+                                </select>
+                            </div>
+                            <div class="select-wrapper">
+                                <i class="fa-solid fa-layer-group select-icon"></i>
+                                <select id="groupingType" class="filter-select">
+                                    <option value="location">Floor & Room</option>
+                                    <option value="domain">Domain</option>
+                                    <option value="flat">No Grouping</option>
+                                </select>
+                            </div>
+                            <div class="toggle-pill">
+                                <label class="switch-toggle">
+                                    <input type="checkbox" id="exposedOnlyCheckbox">
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="toggle-label">Exposed Only</span>
+                            </div>
+                            <button id="toggleAdvancedFiltersBtn" class="btn btn-secondary btn-icon-text">
+                                <i class="fa-solid fa-sliders"></i>
+                                <span>Filters</span>
+                                <span id="activeFilterBadge" class="filter-badge" style="display: none;">0</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Collapsible Advanced Filters Drawer -->
+                    <div id="advancedFiltersDrawer" class="advanced-filters-drawer" style="display: none;">
+                        <div class="advanced-filters-toggles">
+                            <div class="toggle-pill">
+                                <label class="switch-toggle">
+                                    <input type="checkbox" id="hideGroupedLightsCheckbox">
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="toggle-label">Hide Grouped Lights</span>
+                            </div>
+                            <div class="toggle-pill">
+                                <label class="switch-toggle">
+                                    <input type="checkbox" id="hideUnavailableCheckbox">
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="toggle-label">Hide Unavailable</span>
+                            </div>
+                        </div>
+                        <div class="domain-filters-section">
+                            <div class="domain-filters-header">
+                                <span class="section-title">Include Domains / Types</span>
+                            </div>
+                            <div id="domainChipsContainer" class="domain-chips-container">
+                                <!-- Rendered dynamically as active/inactive chips -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Main Content (Scrollable Data Grid) -->
+                <main class="table-container" id="tableContainer">
+                    <table id="entityTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 40%;">Entity</th>
+                                <th style="width: 35%;">Nicknames / Aliases</th>
+                                <th style="width: 15%; text-align: center;">Exposed Status</th>
+                                <th style="width: 10%; text-align: center;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="entityTableBody">
+                            <tr>
+                                <td colspan="4" class="loading-state">
+                                    <div class="spinner"></div>
+                                    <span>Loading Home Assistant registry...</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </main>
+            </div>
+        </div>
     </div>
 
 
