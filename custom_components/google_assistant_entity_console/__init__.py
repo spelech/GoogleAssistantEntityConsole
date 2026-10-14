@@ -41,7 +41,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         version = integration.version
     except Exception as err:
         _LOGGER.error("Failed to read version from integration loader: %s", err)
-        version = "1.9.0"
+        version = "1.0.3"
 
     # 1. Register static files directory
     static_dir = hass.config.path("custom_components/google_assistant_entity_console/static")
