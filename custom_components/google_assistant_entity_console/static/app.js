@@ -4,6 +4,8 @@ let filteredEntities = [];
 let rooms = [];
 let currentAliases = [];
 const collapsedGroups = new Set();
+let activeSlice = { type: 'all', value: 'all', label: 'All Entities' };
+let sidebarCollapsed = localStorage.getItem('gaec_sidebar_collapsed') === 'true';
 
 // DOM Elements
 const totalEntitiesEl = document.getElementById('totalEntities');
@@ -11,6 +13,27 @@ const exposedEntitiesEl = document.getElementById('exposedEntities');
 const searchInput = document.getElementById('searchInput');
 const roomFilter = document.getElementById('roomFilter');
 const exposedOnlyCheckbox = document.getElementById('exposedOnlyCheckbox');
+
+// Slicing & Sidebar DOM Elements
+const appSidebar = document.getElementById('appSidebar');
+const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
+const sidebarCollapseBtn = document.getElementById('sidebarCollapseBtn');
+const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+const sidebarFilterInput = document.getElementById('sidebarFilterInput');
+const exposureNav = document.getElementById('exposureNav');
+const areasNav = document.getElementById('areasNav');
+const domainsNav = document.getElementById('domainsNav');
+const countAllEl = document.getElementById('countAll');
+const countExposedEl = document.getElementById('countExposed');
+const countUnexposedEl = document.getElementById('countUnexposed');
+const countOverridesEl = document.getElementById('countOverrides');
+const areasCountBadge = document.getElementById('areasCountBadge');
+const domainsCountBadge = document.getElementById('domainsCountBadge');
+const breadcrumbSliceText = document.getElementById('breadcrumbSliceText');
+const clearSliceBtn = document.getElementById('clearSliceBtn');
+const sliceBulkActionBtn = document.getElementById('sliceBulkActionBtn');
+const sliceBulkActionText = document.getElementById('sliceBulkActionText');
+const regexIndicator = document.getElementById('regexIndicator');
 
 // Advanced Filters DOM & State
 const toggleAdvancedFiltersBtn = document.getElementById('toggleAdvancedFiltersBtn');
@@ -178,6 +201,29 @@ function setupEventListeners() {
     if (exposedOnlyCheckbox) exposedOnlyCheckbox.addEventListener('change', applyFilters);
     if (groupingType) groupingType.addEventListener('change', applyFilters);
     
+    // Sidebar & Slicing Event Listeners
+    if (sidebarToggleBtn) {
+        sidebarToggleBtn.addEventListener('click', () => toggleSidebar());
+    }
+    if (sidebarCollapseBtn) {
+        sidebarCollapseBtn.addEventListener('click', () => toggleSidebar(true));
+    }
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', () => toggleSidebar(true));
+    }
+    if (sidebarFilterInput) {
+        sidebarFilterInput.addEventListener('input', () => renderSidebar());
+    }
+    if (clearSliceBtn) {
+        clearSliceBtn.addEventListener('click', clearSlice);
+    }
+    if (sliceBulkActionBtn) {
+        sliceBulkActionBtn.addEventListener('click', handleSliceBulkAction);
+    }
+    if (sidebarCollapsed && appSidebar) {
+        appSidebar.classList.add('collapsed');
+    }
+
     // Advanced Filters Event Listeners
     if (toggleAdvancedFiltersBtn && advancedFiltersDrawer) {
         toggleAdvancedFiltersBtn.addEventListener('click', () => {
@@ -252,6 +298,16 @@ function setupEventListeners() {
     setupAiEventListeners();
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function updateStats() {
     if (totalEntitiesEl) totalEntitiesEl.textContent = entities.length;
     if (exposedEntitiesEl) exposedEntitiesEl.textContent = entities.filter(e => e.should_expose).length;
@@ -280,6 +336,196 @@ function updateStats() {
             rebuildBtn.classList.remove('pulse-highlight');
         }
     }
+
+    renderSidebar();
+}
+
+function renderSidebar() {
+    if (!exposureNav || !areasNav || !domainsNav) return;
+
+    // 1. Exposure counts
+    const totalCount = entities.length;
+    const exposedCount = entities.filter(e => e.should_expose || e.yaml_exposed).length;
+    const unexposedCount = totalCount - exposedCount;
+    const overridesCount = entities.filter(e => (e.aliases && e.aliases.length > 0) || (e.display_name && e.display_name !== e.original_name)).length;
+
+    if (countAllEl) countAllEl.textContent = totalCount;
+    if (countExposedEl) countExposedEl.textContent = exposedCount;
+    if (countUnexposedEl) countUnexposedEl.textContent = unexposedCount;
+    if (countOverridesEl) countOverridesEl.textContent = overridesCount;
+
+    // Filter term for sidebar sections
+    const filterTerm = sidebarFilterInput ? sidebarFilterInput.value.toLowerCase().trim() : '';
+
+    // 2. Areas
+    const areaMap = new Map();
+    let unassignedAreaCount = 0;
+    entities.forEach(e => {
+        const a = (e.area || '').trim();
+        if (!a || a === 'TBA' || a === 'No Room') {
+            unassignedAreaCount++;
+        } else {
+            areaMap.set(a, (areaMap.get(a) || 0) + 1);
+        }
+    });
+
+    const sortedAreas = [...areaMap.keys()].sort((a, b) => a.localeCompare(b));
+    if (areasCountBadge) areasCountBadge.textContent = sortedAreas.length + (unassignedAreaCount > 0 ? 1 : 0);
+
+    areasNav.innerHTML = '';
+    sortedAreas.forEach(areaName => {
+        if (filterTerm && !areaName.toLowerCase().includes(filterTerm)) return;
+        const count = areaMap.get(areaName);
+        const item = document.createElement('div');
+        const isActive = activeSlice.type === 'area' && activeSlice.value.toLowerCase() === areaName.toLowerCase();
+        item.className = `sidebar-item ${isActive ? 'active' : ''}`;
+        item.dataset.sliceType = 'area';
+        item.dataset.sliceValue = areaName;
+        item.innerHTML = `
+            <span class="sidebar-item-label"><i class="fa-solid fa-door-open"></i> ${escapeHtml(areaName)}</span>
+            <span class="sidebar-item-count">${count}</span>
+        `;
+        item.addEventListener('click', () => setSlice('area', areaName, areaName));
+        areasNav.appendChild(item);
+    });
+
+    if (unassignedAreaCount > 0 && (!filterTerm || 'unassigned area'.includes(filterTerm) || 'no room'.includes(filterTerm))) {
+        const item = document.createElement('div');
+        const isActive = activeSlice.type === 'area' && activeSlice.value === '__unassigned__';
+        item.className = `sidebar-item ${isActive ? 'active' : ''}`;
+        item.dataset.sliceType = 'area';
+        item.dataset.sliceValue = '__unassigned__';
+        item.innerHTML = `
+            <span class="sidebar-item-label"><i class="fa-solid fa-question text-muted"></i> <em>Unassigned Area</em></span>
+            <span class="sidebar-item-count">${unassignedAreaCount}</span>
+        `;
+        item.addEventListener('click', () => setSlice('area', '__unassigned__', 'Unassigned Area'));
+        areasNav.appendChild(item);
+    }
+
+    // 3. Domains
+    const domainMap = new Map();
+    entities.forEach(e => {
+        const d = (e.domain || 'other').trim();
+        domainMap.set(d, (domainMap.get(d) || 0) + 1);
+    });
+
+    const sortedDomains = [...domainMap.keys()].sort((a, b) => domainMap.get(b) - domainMap.get(a));
+    if (domainsCountBadge) domainsCountBadge.textContent = sortedDomains.length;
+
+    domainsNav.innerHTML = '';
+    sortedDomains.forEach(domain => {
+        const domainFriendly = getDomainName(domain);
+        if (filterTerm && !domain.toLowerCase().includes(filterTerm) && !domainFriendly.toLowerCase().includes(filterTerm)) return;
+        const count = domainMap.get(domain);
+        const item = document.createElement('div');
+        const isActive = activeSlice.type === 'domain' && activeSlice.value.toLowerCase() === domain.toLowerCase();
+        item.className = `sidebar-item ${isActive ? 'active' : ''}`;
+        item.dataset.sliceType = 'domain';
+        item.dataset.sliceValue = domain;
+        item.innerHTML = `
+            <span class="sidebar-item-label"><i class="fa-solid ${getEntityIcon(domain)}"></i> ${escapeHtml(domainFriendly)}</span>
+            <span class="sidebar-item-count">${count}</span>
+        `;
+        item.addEventListener('click', () => setSlice('domain', domain, domainFriendly));
+        domainsNav.appendChild(item);
+    });
+
+    // Sync active classes on exposureNav items
+    if (exposureNav) {
+        const items = exposureNav.querySelectorAll('.sidebar-item');
+        items.forEach(el => {
+            const type = el.dataset.sliceType;
+            const val = el.dataset.sliceValue;
+            if (activeSlice.type === type && activeSlice.value === val) {
+                el.classList.add('active');
+            } else {
+                el.classList.remove('active');
+            }
+            if (!el.onclick) {
+                el.onclick = () => {
+                    const label = el.querySelector('.sidebar-item-label')?.textContent?.trim() || val;
+                    setSlice(type, val, label);
+                };
+            }
+        });
+    }
+}
+
+function setSlice(type, value, label) {
+    activeSlice = { type, value, label };
+    
+    // Update breadcrumb display
+    if (breadcrumbSliceText) {
+        if (type === 'all') {
+            breadcrumbSliceText.textContent = `All Entities (${entities.length} items)`;
+            if (clearSliceBtn) clearSliceBtn.style.display = 'none';
+            if (sliceBulkActionBtn) sliceBulkActionBtn.style.display = 'none';
+        } else {
+            const typeName = type === 'exposure' ? 'Exposure' : (type === 'area' ? 'Area' : 'Domain');
+            breadcrumbSliceText.textContent = `${typeName} / ${label}`;
+            if (clearSliceBtn) clearSliceBtn.style.display = 'inline-flex';
+            if (sliceBulkActionBtn) sliceBulkActionBtn.style.display = 'inline-flex';
+        }
+    }
+
+    renderSidebar();
+
+    // On mobile, close sidebar drawer upon selecting a slice
+    if (window.innerWidth <= 768 && appSidebar && !appSidebar.classList.contains('collapsed')) {
+        toggleSidebar(true);
+    }
+
+    applyFilters();
+}
+
+function clearSlice() {
+    setSlice('all', 'all', 'All Entities');
+}
+
+function toggleSidebar(forceCollapse) {
+    if (!appSidebar) return;
+    const shouldCollapse = forceCollapse !== undefined ? forceCollapse : !appSidebar.classList.contains('collapsed');
+    appSidebar.classList.toggle('collapsed', shouldCollapse);
+    if (sidebarBackdrop) {
+        sidebarBackdrop.classList.toggle('active', !shouldCollapse && window.innerWidth <= 768);
+    }
+    localStorage.setItem('gaec_sidebar_collapsed', shouldCollapse);
+}
+
+async function handleSliceBulkAction() {
+    if (activeSlice.type === 'all' || filteredEntities.length === 0) return;
+    
+    const exposedInSlice = filteredEntities.filter(e => e.should_expose || e.yaml_exposed).length;
+    const willExpose = exposedInSlice < filteredEntities.length / 2;
+    const actionWord = willExpose ? 'Expose' : 'Unexpose';
+    
+    if (!confirm(`${actionWord} all ${filteredEntities.length} entities in ${activeSlice.label}?`)) {
+        return;
+    }
+
+    showToast(`${actionWord}ing ${filteredEntities.length} entities...`, 'info');
+    let updated = 0;
+    for (const entity of filteredEntities) {
+        try {
+            const currentExposed = !!(entity.should_expose || entity.yaml_exposed);
+            if (currentExposed !== willExpose) {
+                entity.should_expose = willExpose;
+                await authFetch(`/api/google_assistant_entity_console/entities/${encodeURIComponent(entity.entity_id)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ expose: willExpose })
+                });
+                updated++;
+            }
+        } catch (err) {
+            console.error('Failed to update entity in slice:', entity.entity_id, err);
+        }
+    }
+
+    showToast(`Successfully updated ${updated} entities in ${activeSlice.label}`, 'success');
+    updateStats();
+    applyFilters();
 }
 
 function populateRoomFilter(uniqueRooms) {
@@ -331,43 +577,112 @@ function showTableLoading() {
 
 // Filter and render table
 function applyFilters() {
-    const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    const rawQuery = searchInput ? searchInput.value.trim() : '';
+    let regex = null;
+    let isRegexActive = false;
+    
+    if (rawQuery) {
+        try {
+            regex = new RegExp(rawQuery, 'i');
+            isRegexActive = true;
+        } catch (e) {
+            // Graceful fallback to substring search if invalid regex
+            regex = null;
+            isRegexActive = false;
+        }
+    }
+
+    if (regexIndicator) {
+        if (rawQuery && isRegexActive) {
+            regexIndicator.style.display = 'inline-flex';
+            regexIndicator.title = 'Regex pattern active';
+        } else {
+            regexIndicator.style.display = 'none';
+        }
+    }
+
     const room = roomFilter ? roomFilter.value : 'all';
     const exposedOnly = exposedOnlyCheckbox ? exposedOnlyCheckbox.checked : false;
     const hideGroupedLights = hideGroupedLightsCheckbox ? hideGroupedLightsCheckbox.checked : false;
     const hideUnavailable = hideUnavailableCheckbox ? hideUnavailableCheckbox.checked : false;
-    
+
     filteredEntities = entities.filter(e => {
-        // Query match
-        const matchesQuery = !query || 
-            e.entity_id.toLowerCase().includes(query) || 
-            (e.display_name || '').toLowerCase().includes(query) || 
-            (e.aliases || []).some(a => a && typeof a === 'string' && a.toLowerCase().includes(query));
-            
-        // Domain match (Multi-select)
+        // 1. Slice matching
+        let matchesSlice = true;
+        if (activeSlice.type === 'exposure') {
+            if (activeSlice.value === 'exposed') {
+                matchesSlice = !!(e.should_expose || e.yaml_exposed);
+            } else if (activeSlice.value === 'unexposed') {
+                matchesSlice = !(e.should_expose || e.yaml_exposed);
+            } else if (activeSlice.value === 'overrides') {
+                matchesSlice = (e.aliases && e.aliases.length > 0) || (e.display_name && e.display_name !== e.original_name);
+            }
+        } else if (activeSlice.type === 'area') {
+            if (activeSlice.value === '__unassigned__') {
+                matchesSlice = !e.area || e.area === 'TBA' || e.area === 'No Room';
+            } else {
+                matchesSlice = (e.area || '').toLowerCase() === activeSlice.value.toLowerCase();
+            }
+        } else if (activeSlice.type === 'domain') {
+            matchesSlice = (e.domain || '').toLowerCase() === activeSlice.value.toLowerCase();
+        }
+
+        if (!matchesSlice) return false;
+
+        // 2. Query / Regex match across friendly name, entity_id, google name, aliases, area
+        if (rawQuery) {
+            const targets = [
+                e.entity_id || '',
+                e.display_name || '',
+                e.original_name || e.name || '',
+                e.area || '',
+                ...(e.aliases || []).filter(a => typeof a === 'string')
+            ];
+            const matchesQuery = regex 
+                ? targets.some(t => regex.test(t))
+                : targets.some(t => t.toLowerCase().includes(rawQuery.toLowerCase()));
+            if (!matchesQuery) return false;
+        }
+
+        // 3. Domain chip filter (Multi-select)
         const matchesDomain = selectedDomains.size === 0 || selectedDomains.has(e.domain);
-        
-        // Room match
+        if (!matchesDomain) return false;
+
+        // 4. Room dropdown filter
         const matchesRoom = room === 'all' || (e.area || '').toLowerCase() === room;
-        
-        // Exposed match (either marked in registry or currently exposed in YAML)
+        if (!matchesRoom) return false;
+
+        // 5. Exposed Only toggle
         const matchesExposed = !exposedOnly || e.should_expose || e.yaml_exposed;
-        
-        // Hide Grouped Lights match
+        if (!matchesExposed) return false;
+
+        // 6. Grouped lights filter
         const matchesGroupedLights = !hideGroupedLights || e.domain !== 'light' || !e.in_group;
-        
-        // Hide Unavailable match
+        if (!matchesGroupedLights) return false;
+
+        // 7. Unavailable filter
         const matchesUnavailable = !hideUnavailable || !e.unavailable;
-        
-        return matchesQuery && matchesDomain && matchesRoom && matchesExposed && matchesGroupedLights && matchesUnavailable;
+        if (!matchesUnavailable) return false;
+
+        return true;
     });
 
+    // Update match count badge
     const matchCountEl = document.getElementById('filterMatchCount');
     if (matchCountEl) {
-        if (!query && room === 'all' && !exposedOnly && selectedDomains.size === 0) {
+        if (!rawQuery && room === 'all' && !exposedOnly && selectedDomains.size === 0 && activeSlice.type === 'all') {
             matchCountEl.textContent = `${entities.length} items`;
         } else {
             matchCountEl.textContent = `${filteredEntities.length} of ${entities.length}`;
+        }
+    }
+
+    // Update bulk action text for slice
+    if (sliceBulkActionBtn && activeSlice.type !== 'all') {
+        const exposedInSlice = filteredEntities.filter(e => e.should_expose || e.yaml_exposed).length;
+        const willExpose = exposedInSlice < filteredEntities.length / 2;
+        if (sliceBulkActionText) {
+            sliceBulkActionText.textContent = `${willExpose ? 'Expose' : 'Unexpose'} All in Slice (${filteredEntities.length})`;
         }
     }
     
