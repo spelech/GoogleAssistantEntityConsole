@@ -22,7 +22,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest pytest-asyncio pytest-mock anyio pyyaml aiohttp
+          pip install ruff pytest pytest-asyncio pytest-mock anyio pyyaml aiohttp playwright
+          playwright install chromium
 
       - name: Run Ruff linter
         run: ruff check .

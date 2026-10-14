@@ -33,6 +33,7 @@ const countUnexposedEl = document.getElementById('countUnexposed');
 const countOverridesEl = document.getElementById('countOverrides');
 const areasCountBadge = document.getElementById('areasCountBadge');
 const domainsCountBadge = document.getElementById('domainsCountBadge');
+const breadcrumbContainer = document.getElementById('breadcrumbContainer');
 const breadcrumbSliceText = document.getElementById('breadcrumbSliceText');
 const breadcrumbChips = document.getElementById('breadcrumbChips');
 const clearSliceBtn = document.getElementById('clearSliceBtn');
@@ -587,7 +588,8 @@ function updateBreadcrumbs() {
         breadcrumbChips.innerHTML = '';
         chips.forEach(c => {
             const chipEl = document.createElement('div');
-            chipEl.className = 'filter-chip';
+            chipEl.className = 'filter-chip breadcrumb-chip';
+            chipEl.dataset.filterType = c.type;
             chipEl.innerHTML = `${c.html} <span class="chip-remove" title="Remove filter">&times;</span>`;
             chipEl.querySelector('.chip-remove').addEventListener('click', (e) => {
                 e.stopPropagation();
