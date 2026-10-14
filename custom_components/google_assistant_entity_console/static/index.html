@@ -156,14 +156,15 @@
                     <div class="breadcrumb-left">
                         <i class="fa-solid fa-layer-group breadcrumb-icon"></i>
                         <span id="breadcrumbSliceText" class="breadcrumb-text">All Entities</span>
-                        <button id="clearSliceBtn" class="clear-slice-btn" title="Reset filter to All Entities" style="display: none;">
-                            <i class="fa-solid fa-xmark"></i> Clear Slice
+                        <div id="breadcrumbChips" class="breadcrumb-chips-list" style="display: none;"></div>
+                        <button id="clearSliceBtn" class="clear-slice-btn" title="Reset all filters" style="display: none;">
+                            <i class="fa-solid fa-xmark"></i> Clear All
                         </button>
                     </div>
                     <div class="breadcrumb-right">
                         <button id="sliceBulkActionBtn" class="btn btn-secondary btn-sm" style="display: none;">
                             <i class="fa-solid fa-wand-magic-sparkles"></i>
-                            <span id="sliceBulkActionText">Expose All in Slice</span>
+                            <span id="sliceBulkActionText">Expose All in Filter</span>
                         </button>
                     </div>
                 </section>
@@ -173,7 +174,7 @@
                     <div class="controls-primary-row">
                         <div class="search-box">
                             <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                            <input type="text" id="searchInput" placeholder="Search by entity name, ID, or nickname (supports regex)..." autocomplete="off">
+                            <input type="text" id="searchInput" placeholder="Search name, ID, alias (regex or not:exposed area:basement)..." autocomplete="off">
                             <span id="regexIndicator" class="regex-indicator" title="Regex search active" style="display: none;">.*</span>
                             <button id="clearSearchBtn" class="clear-search-btn" title="Clear search" style="display: none;">
                                 <i class="fa-solid fa-xmark"></i>

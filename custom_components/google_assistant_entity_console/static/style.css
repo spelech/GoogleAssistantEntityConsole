@@ -368,6 +368,44 @@ html, body {
     border-color: var(--danger);
 }
 
+.breadcrumb-chips-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-variant);
+    border: 1px solid var(--border);
+    color: var(--on-surface);
+    font-size: 0.74rem;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.filter-chip strong {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.filter-chip .chip-remove {
+    cursor: pointer;
+    color: var(--on-surface-variant);
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    transition: color 0.15s ease;
+}
+
+.filter-chip .chip-remove:hover {
+    color: var(--danger);
+}
+
 .btn-sm {
     padding: 0.35rem 0.75rem;
     font-size: 0.78rem;
