@@ -20,31 +20,34 @@
 <body>
     <div class="app-container">
         <!-- Header -->
-        <header>
+        <header class="app-header">
             <div class="logo">
-                <img src="/google_assistant_entity_console/static/logo.png" style="width: 32px; height: 32px; border-radius: 8px; margin-right: 0.6rem; flex-shrink: 0;" alt="Google Assistant Entity Console Logo">
+                <img src="/google_assistant_entity_console/static/logo.png" alt="Google Assistant Entity Console Logo">
                 <div class="logo-text">
-                    <h1>Google Assistant</h1>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <h1>Google Assistant</h1>
+                        <span id="pendingChangesBadge" class="badge-pending-header" style="display: none;">0 Pending</span>
+                    </div>
                     <span id="appVersion">Entity Console</span>
                 </div>
             </div>
-            <div class="header-actions" style="display: flex; gap: 0.75rem;">
+            <div class="header-actions">
                 <button id="openAiSettingsBtn" class="btn btn-secondary">
                     <i class="fa-solid fa-robot"></i>
                     <span>AI Settings</span>
                 </button>
                 <button id="manageBlocklistBtn" class="btn btn-secondary">
                     <i class="fa-solid fa-ban"></i>
-                    <span>Manage Blocklist</span>
+                    <span>Blocklist</span>
                 </button>
                 <button id="rebuildBtn" class="btn btn-primary">
                     <i class="fa-solid fa-file-code"></i>
-                    <span>Rebuild Config</span>
+                    <span>Sync & Rebuild</span>
                 </button>
             </div>
         </header>
 
-        <!-- Stats Overview -->
+        <!-- KPI Stats Ribbon -->
         <section class="stats-container">
             <div class="stat-card">
                 <div class="stat-icon"><i class="fa-solid fa-list-check"></i></div>
@@ -54,64 +57,80 @@
                 </div>
             </div>
             <div class="stat-card">
-                <div class="stat-icon success"><i class="fa-solid fa-eye"></i></div>
+                <div class="stat-icon success"><i class="fa-solid fa-cloud-arrow-up"></i></div>
                 <div class="stat-content">
                     <span class="stat-label">Exposed to Google</span>
                     <h2 id="exposedEntities">0</h2>
                 </div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card" id="pendingStatCard">
+                <div class="stat-icon warning"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                <div class="stat-content">
+                    <span class="stat-label">Pending Sync</span>
+                    <h2 id="pendingEntitiesStat">0</h2>
+                </div>
+            </div>
+            <div class="stat-card config-card">
                 <div class="stat-icon info"><i class="fa-solid fa-file-code"></i></div>
                 <div class="stat-content">
                     <span class="stat-label">Active YAML Config</span>
-                    <h2 id="configFile" style="font-size: 1.1rem; line-height: 1.8;">Loading...</h2>
+                    <h2 id="configFile">Loading...</h2>
                 </div>
             </div>
         </section>
 
-        <!-- Information Alert Bar -->
-        <div class="info-alert-bar">
-            <i class="fa-solid fa-circle-info"></i>
-            <span>The <strong>Exposed Status</strong> is determined by the active Google Assistant YAML configuration file. Toggling exposure updates the Home Assistant registry and marks the entity as <strong>Pending Add</strong> or <strong>Pending Remove</strong> until you click <strong>Sync & Rebuild</strong>.</span>
-        </div>
-
-        <!-- Filter & Search Controls -->
+        <!-- Sticky Controls Toolbar -->
         <section class="controls-container">
-            <div class="search-box">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="searchInput" placeholder="Search by name, ID or nickname...">
-            </div>
-            <div class="filters">
-                <select id="roomFilter" class="filter-select">
-                    <option value="all">All Rooms</option>
-                </select>
-                <select id="groupingType" class="filter-select">
-                    <option value="location">Group by Floor & Room</option>
-                    <option value="domain">Group by Domain</option>
-                </select>
-                <div class="toggle-container">
-                    <label class="switch-toggle">
-                        <input type="checkbox" id="exposedOnlyCheckbox">
-                        <span class="slider"></span>
-                    </label>
-                    <span class="toggle-label">Exposed Only</span>
+            <div class="controls-primary-row">
+                <div class="search-box">
+                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="Search by entity name, ID, or nickname..." autocomplete="off">
+                    <button id="clearSearchBtn" class="clear-search-btn" title="Clear search" style="display: none;">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <span id="filterMatchCount" class="match-count-badge"></span>
                 </div>
-                <button id="toggleAdvancedFiltersBtn" class="btn btn-secondary" style="padding: 0.5rem 1rem; border-radius: 12px; font-size: 0.85rem; height: 38px;">
-                    <i class="fa-solid fa-sliders"></i> Advanced Filters
-                </button>
+                <div class="filters-group">
+                    <div class="select-wrapper">
+                        <i class="fa-solid fa-door-open select-icon"></i>
+                        <select id="roomFilter" class="filter-select">
+                            <option value="all">All Rooms</option>
+                        </select>
+                    </div>
+                    <div class="select-wrapper">
+                        <i class="fa-solid fa-layer-group select-icon"></i>
+                        <select id="groupingType" class="filter-select">
+                            <option value="location">Floor & Room</option>
+                            <option value="domain">Domain</option>
+                            <option value="flat">No Grouping</option>
+                        </select>
+                    </div>
+                    <div class="toggle-pill">
+                        <label class="switch-toggle">
+                            <input type="checkbox" id="exposedOnlyCheckbox">
+                            <span class="slider"></span>
+                        </label>
+                        <span class="toggle-label">Exposed Only</span>
+                    </div>
+                    <button id="toggleAdvancedFiltersBtn" class="btn btn-secondary btn-icon-text">
+                        <i class="fa-solid fa-sliders"></i>
+                        <span>Filters</span>
+                        <span id="activeFilterBadge" class="filter-badge" style="display: none;">0</span>
+                    </button>
+                </div>
             </div>
             
             <!-- Collapsible Advanced Filters Drawer -->
-            <div id="advancedFiltersDrawer" style="display: none; width: 100%; border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; flex-direction: column; gap: 1rem;">
-                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center;">
-                    <div class="toggle-container">
+            <div id="advancedFiltersDrawer" class="advanced-filters-drawer" style="display: none;">
+                <div class="advanced-filters-toggles">
+                    <div class="toggle-pill">
                         <label class="switch-toggle">
                             <input type="checkbox" id="hideGroupedLightsCheckbox">
                             <span class="slider"></span>
                         </label>
                         <span class="toggle-label">Hide Grouped Lights</span>
                     </div>
-                    <div class="toggle-container">
+                    <div class="toggle-pill">
                         <label class="switch-toggle">
                             <input type="checkbox" id="hideUnavailableCheckbox">
                             <span class="slider"></span>
@@ -119,29 +138,31 @@
                         <span class="toggle-label">Hide Unavailable</span>
                     </div>
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 0.5rem; width: 100%;">
-                    <span style="font-size: 0.8rem; font-weight: 500; color: var(--on-surface-variant);">Include Domains / Types</span>
-                    <div id="domainChipsContainer" style="display: flex; flex-wrap: wrap; gap: 0.5rem; width: 100%;">
+                <div class="domain-filters-section">
+                    <div class="domain-filters-header">
+                        <span class="section-title">Include Domains / Types</span>
+                    </div>
+                    <div id="domainChipsContainer" class="domain-chips-container">
                         <!-- Rendered dynamically as active/inactive chips -->
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- Main Content (Table) -->
-        <main class="table-container">
+        <!-- Main Content (Scrollable Data Grid) -->
+        <main class="table-container" id="tableContainer">
             <table id="entityTable">
                 <thead>
                     <tr>
-                        <th width="45%">Entity</th>
-                        <th width="35%">Nicknames / Aliases</th>
-                        <th width="15%" style="text-align: center;">Exposed Status</th>
-                        <th width="5%" style="text-align: center;">Actions</th>
+                        <th style="width: 40%;">Entity</th>
+                        <th style="width: 35%;">Nicknames / Aliases</th>
+                        <th style="width: 15%; text-align: center;">Exposed Status</th>
+                        <th style="width: 10%; text-align: center;">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="entityTableBody">
                     <tr>
-                        <td colspan="5" class="loading-state">
+                        <td colspan="4" class="loading-state">
                             <div class="spinner"></div>
                             <span>Loading Home Assistant registry...</span>
                         </td>
