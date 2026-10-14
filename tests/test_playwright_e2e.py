@@ -132,7 +132,7 @@ def page(static_server):
                 content_type="application/json",
                 body=json.dumps({
                     "entities": SAMPLE_ENTITIES,
-                    "version": "1.10.1",
+                    "version": "2.0.0",
                     "yaml_filename": "configuration.yaml",
                 }),
             ),

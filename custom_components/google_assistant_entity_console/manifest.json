@@ -3,10 +3,10 @@
   "name": "Google Assistant Entity Console",
   "codeowners": ["@spelech"],
   "dependencies": ["frontend", "http"],
-  "documentation": "https://github.com/spelech/googleAssistantConfigGen",
-  "issue_tracker": "https://github.com/spelech/googleAssistantConfigGen/issues",
+  "documentation": "https://github.com/spelech/GoogleAssistantEntityConsole",
+  "issue_tracker": "https://github.com/spelech/GoogleAssistantEntityConsole/issues",
   "iot_class": "local_polling",
   "config_flow": true,
   "requirements": [],
-  "version": "1.10.1"
+  "version": "2.0.0"
 }

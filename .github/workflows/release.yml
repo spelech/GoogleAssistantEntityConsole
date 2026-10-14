@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build HACS zip archive
+        run: |
+          cd custom_components
+          zip -r ../google_assistant_entity_console.zip google_assistant_entity_console -x "*.pyc" "*__pycache__*"
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: google_assistant_entity_console.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false

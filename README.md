@@ -66,14 +66,14 @@ Configuring entities exposed to Google Assistant in Home Assistant traditionally
 
 1. Open **HACS** in your Home Assistant sidebar.
 2. Click the three dots (⋮) in the top-right corner and select **Custom repositories**.
-3. Enter the repository URL: `https://github.com/spelech/googleAssistantConfigGen`
+3. Enter the repository URL: `https://github.com/spelech/GoogleAssistantEntityConsole`
 4. Select **Integration** as the Category and click **Add**.
 5. Find **Google Assistant Entity Console** in HACS, click **Download**, and select the latest release.
 6. Restart Home Assistant.
 
 ### Method 2: Manual Installation
 
-1. Download the latest release `.zip` from the [Releases](https://github.com/spelech/googleAssistantConfigGen/releases) tab.
+1. Download the latest release `.zip` from the [Releases](https://github.com/spelech/GoogleAssistantEntityConsole/releases) tab.
 2. Extract and copy the `custom_components/google_assistant_entity_console/` directory into your Home Assistant `/config/custom_components/` directory.
 3. Restart Home Assistant.
 
