@@ -5,7 +5,6 @@ from homeassistant.config_entries import ConfigEntryState
 
 from custom_components.google_assistant_entity_console.runtime import (
     GoogleAssistantRuntimeManager,
-    async_get_runtime,
 )
 
 

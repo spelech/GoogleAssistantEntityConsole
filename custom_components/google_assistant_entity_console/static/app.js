@@ -146,10 +146,20 @@ async function fetchEntities() {
         const data = await response.json();
         entities = Array.isArray(data) ? data : (data.entities || []);
         
-        // Update Active YAML Config display name
+        // Update Sync Mode / Config display name
         const configFileEl = document.getElementById('configFile');
         if (configFileEl) {
-            configFileEl.textContent = Array.isArray(data) ? 'gaGen_112225.yaml' : (data.yaml_filename || 'None (Not Configured)');
+            if (Array.isArray(data)) {
+                configFileEl.textContent = '.storage Live';
+            } else if (data.storage_mode === 'storage') {
+                configFileEl.textContent = data.project_id ? `.storage Live (${data.project_id})` : '.storage Live';
+            } else if (data.storage_mode === 'yaml_attached') {
+                configFileEl.textContent = data.project_id ? `YAML Attached (${data.project_id})` : 'YAML Attached';
+            } else if (data.yaml_filename && data.yaml_filename !== '.storage') {
+                configFileEl.textContent = data.yaml_filename;
+            } else {
+                configFileEl.textContent = '.storage Live';
+            }
         }
 
         // Update app version label
@@ -1417,47 +1427,47 @@ window.openQuickAliasModal = function(entityId, event) {
 // Open Edit Modal
 
 
-// Trigger YAML generation & rebuild
+// Trigger live zero-reboot sync to Google HomeGraph & .storage
 async function handleRebuild() {
     rebuildBtn.disabled = true;
     const icon = rebuildBtn.querySelector('i');
     icon.className = 'fa-solid fa-spinner fa-spin';
     
     try {
-        const result = await authFetch('/api/google_assistant_entity_console/rebuild', {
+        let result = await authFetch('/api/google_assistant_entity_console/sync', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({})
         });
+        if (result.status === 404) {
+            result = await authFetch('/api/google_assistant_entity_console/rebuild', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            });
+        }
         
         if (!result.ok) {
             const err = await result.json();
-            throw new Error(err.error || 'Rebuild failed');
+            throw new Error(err.error || 'Sync failed');
         }
         
         const data = await result.json();
-        showToast(`Configuration generated successfully. (${data.exposed_count} entities exposed)`, 'success');
-
-        const missingIncludeContainer = document.getElementById('missingIncludeContainer');
-        const missingIncludeInput = document.getElementById('missingIncludeInput');
-        if (missingIncludeContainer && missingIncludeInput) {
-            if (data.has_include_directive === false && data.required_include) {
-                missingIncludeInput.value = data.required_include;
-                missingIncludeContainer.style.display = 'block';
-            } else {
-                missingIncludeContainer.style.display = 'none';
-            }
+        await fetchEntities();
+        if (data.message) {
+            showToast(data.message, 'success');
+        } else {
+            showToast(`Synced ${data.exposed_count} entities to Google HomeGraph!`, 'success');
         }
-
-        // Open restart confirmation modal
-        restartModal.style.display = 'block';
     } catch (error) {
-        showToast('Error rebuilding configs: ' + error.message, 'error');
+        showToast('Error syncing to Google: ' + error.message, 'error');
     } finally {
         rebuildBtn.disabled = false;
-        icon.className = 'fa-solid fa-file-code';
+        icon.className = 'fa-solid fa-cloud-arrow-up';
     }
 }
 
@@ -1820,8 +1830,48 @@ window.addToBlocklistDirectly = async function(entityId, event) {
     }
 };
 
-// AI Features: Settings, Modal, and Assistant Logic
+// AI & Google Assistant Features: Settings, Modal, and Assistant Logic
 let aiSettings = {};
+let googleSettings = {};
+
+async function loadGoogleSettings() {
+    try {
+        const response = await authFetch('/api/google_assistant_entity_console/google_settings', {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        googleSettings = data.google_settings || {};
+
+        const projInput = document.getElementById('gaProjectIdInput');
+        const pinInput = document.getElementById('gaPinInput');
+        const reportStateToggle = document.getElementById('gaReportStateToggle');
+        const autoSyncToggle = document.getElementById('gaAutoSyncToggle');
+        const saStatus = document.getElementById('gaServiceAccountStatus');
+        const saInput = document.getElementById('gaServiceAccountInput');
+        const migrateBtn = document.getElementById('migrateYamlBtn');
+
+        if (projInput) projInput.value = googleSettings.project_id || '';
+        if (pinInput) pinInput.value = googleSettings.secure_devices_pin || '';
+        if (reportStateToggle) reportStateToggle.checked = googleSettings.report_state !== false;
+        if (autoSyncToggle) autoSyncToggle.checked = googleSettings.auto_sync !== false;
+        if (saInput) saInput.value = '';
+        if (saStatus) {
+            if (googleSettings.has_service_account && googleSettings.client_email) {
+                saStatus.textContent = `Stored: ${googleSettings.client_email}`;
+                saStatus.style.color = 'var(--success)';
+            } else {
+                saStatus.textContent = 'Not configured';
+                saStatus.style.color = 'var(--on-surface-variant)';
+            }
+        }
+        if (migrateBtn) {
+            migrateBtn.style.display = data.has_legacy_yaml ? 'inline-flex' : 'none';
+        }
+    } catch (e) {
+        console.error('Failed to load Google settings', e);
+    }
+}
 
 async function loadAiSettings() {
     try {
@@ -1879,9 +1929,10 @@ function updateConnectionFieldsDisplay(source) {
     }
 }
 
-// Bind AI Events
+// Bind AI & Google Settings Events
 function setupAiEventListeners() {
     loadAiSettings();
+    loadGoogleSettings();
     
     const openAiSettingsBtn = document.getElementById('openAiSettingsBtn');
     const aiSettingsModal = document.getElementById('aiSettingsModal');
@@ -1889,11 +1940,41 @@ function setupAiEventListeners() {
     const closeAiSettingsModalBtn = document.getElementById('closeAiSettingsModalBtn');
     const saveAiSettingsBtn = document.getElementById('saveAiSettingsBtn');
     const queryModelsBtn = document.getElementById('queryModelsBtn');
+    const migrateYamlBtn = document.getElementById('migrateYamlBtn');
     
     if (openAiSettingsBtn && aiSettingsModal) {
         openAiSettingsBtn.addEventListener('click', () => {
+            loadGoogleSettings();
+            loadAiSettings();
             aiSettingsModal.style.display = 'block';
             switchSettingsTab('connection');
+        });
+    }
+
+    if (migrateYamlBtn) {
+        migrateYamlBtn.addEventListener('click', async () => {
+            migrateYamlBtn.disabled = true;
+            try {
+                const response = await authFetch('/api/google_assistant_entity_console/migrate_yaml', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({})
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Migration failed');
+                }
+                await loadGoogleSettings();
+                await fetchEntities();
+                showToast('Migrated Google Assistant credentials to .storage and disabled YAML block!', 'success');
+            } catch (error) {
+                showToast('Error migrating YAML: ' + error.message, 'error');
+            } finally {
+                migrateYamlBtn.disabled = false;
+            }
         });
     }
     
@@ -1969,10 +2050,40 @@ function setupAiEventListeners() {
             const nicknamePrompt = document.getElementById('nicknamePrompt').value;
             const singleNicknamePrompt = document.getElementById('singleNicknamePrompt').value;
             const exposurePrompt = document.getElementById('exposurePrompt').value;
+
+            const gaProjectIdEl = document.getElementById('gaProjectIdInput');
+            const gaPinEl = document.getElementById('gaPinInput');
+            const gaReportStateEl = document.getElementById('gaReportStateToggle');
+            const gaAutoSyncEl = document.getElementById('gaAutoSyncToggle');
+            const gaSaInputEl = document.getElementById('gaServiceAccountInput');
             
             saveAiSettingsBtn.disabled = true;
             saveAiSettingsBtn.textContent = 'Saving...';
             try {
+                if (gaProjectIdEl) {
+                    const gaPayload = {
+                        project_id: gaProjectIdEl.value.trim(),
+                        secure_devices_pin: gaPinEl ? gaPinEl.value.trim() : '',
+                        report_state: gaReportStateEl ? gaReportStateEl.checked : true,
+                        auto_sync: gaAutoSyncEl ? gaAutoSyncEl.checked : true,
+                    };
+                    if (gaSaInputEl && gaSaInputEl.value.trim()) {
+                        gaPayload.service_account = gaSaInputEl.value.trim();
+                    }
+                    const gaResponse = await authFetch('/api/google_assistant_entity_console/google_settings', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...getAuthHeaders()
+                        },
+                        body: JSON.stringify(gaPayload)
+                    });
+                    if (!gaResponse.ok && gaResponse.status !== 404) {
+                        const err = await gaResponse.json();
+                        throw new Error(err.error || 'Failed to save Google Assistant settings');
+                    }
+                }
+
                 const response = await authFetch('/api/google_assistant_entity_console/ai/settings', {
                     method: 'POST',
                     headers: {
@@ -2006,7 +2117,9 @@ function setupAiEventListeners() {
                     single_nickname_prompt: singleNicknamePrompt,
                     exposure_prompt: exposurePrompt
                 };
-                showToast('AI Settings saved successfully', 'success');
+                await loadGoogleSettings();
+                await fetchEntities();
+                showToast('Settings saved to .storage successfully', 'success');
                 closeSettings();
             } catch (error) {
                 showToast('Error saving settings: ' + error.message, 'error');

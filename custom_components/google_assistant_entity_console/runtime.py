@@ -15,8 +15,10 @@ from homeassistant.components.google_assistant.const import (
     CONF_SERVICE_ACCOUNT,
     DATA_CONFIG,
     DEFAULT_EXPOSED_DOMAINS,
-    DOMAIN as GA_DOMAIN,
     SERVICE_REQUEST_SYNC,
+)
+from homeassistant.components.google_assistant.const import (
+    DOMAIN as GA_DOMAIN,
 )
 from homeassistant.components.google_assistant.http import (
     GoogleAssistantView,
@@ -213,10 +215,12 @@ class GoogleAssistantRuntimeManager:
         elif CONF_SECURE_DEVICES_PIN in cfg and not gs.get("secure_devices_pin"):
             cfg.pop(CONF_SECURE_DEVICES_PIN, None)
 
-        if _has_valid_service_account(gs.get("service_account")):
-            if cfg.get(CONF_SERVICE_ACCOUNT) != gs["service_account"]:
-                cfg[CONF_SERVICE_ACCOUNT] = dict(gs["service_account"])
-                self.google_config._access_token = None
+        if (
+            _has_valid_service_account(gs.get("service_account"))
+            and cfg.get(CONF_SERVICE_ACCOUNT) != gs["service_account"]
+        ):
+            cfg[CONF_SERVICE_ACCOUNT] = dict(gs["service_account"])
+            self.google_config._access_token = None
 
         cfg[CONF_REPORT_STATE] = bool(gs.get("report_state", True))
         if cfg[CONF_REPORT_STATE] and _has_valid_service_account(

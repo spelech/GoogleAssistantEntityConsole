@@ -129,14 +129,14 @@ def _sync_extract_yaml_import(config_dir_getter) -> dict[str, Any]:
         return {}
 
     google_settings: dict[str, Any] = {}
-    if project_id := ga_data.get("project_id"):
-        if not str(project_id).startswith("!secret "):
-            google_settings["project_id"] = str(project_id)
+    project_id = ga_data.get("project_id")
+    if project_id and not str(project_id).startswith("!secret "):
+        google_settings["project_id"] = str(project_id)
     if "report_state" in ga_data:
         google_settings["report_state"] = bool(ga_data.get("report_state"))
-    if pin := ga_data.get("secure_devices_pin"):
-        if not str(pin).startswith("!secret "):
-            google_settings["secure_devices_pin"] = str(pin)
+    pin = ga_data.get("secure_devices_pin")
+    if pin and not str(pin).startswith("!secret "):
+        google_settings["secure_devices_pin"] = str(pin)
     if isinstance(ga_data.get("service_account"), dict):
         sa = ga_data["service_account"]
         if sa.get("client_email") and sa.get("private_key"):
