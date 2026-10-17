@@ -148,6 +148,33 @@ def page(static_server):
             ),
         )
 
+        # Mock Google settings endpoint
+        pg.route(
+            "**/api/google_assistant_entity_console/google_settings",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "google_settings": {
+                        "project_id": "test-home-proj",
+                        "report_state": True,
+                        "secure_devices_pin": "1234",
+                        "auto_sync": True,
+                        "has_service_account": True,
+                        "client_email": "ga-sync@test-home-proj.iam.gserviceaccount.com",
+                    },
+                    "runtime": {
+                        "mode": "storage",
+                        "project_id": "test-home-proj",
+                        "has_service_account": True,
+                        "is_reporting_state": True,
+                        "agent_users_count": 1,
+                    },
+                    "has_legacy_yaml": True,
+                }),
+            ),
+        )
+
         url = f"http://127.0.0.1:{static_server.port}/index.html"
         pg.goto(url)
         pg.wait_for_selector("#entityTableBody tr.entity-row")
@@ -337,4 +364,147 @@ def test_unassigned_area_filter(page):
     rows = page.locator("#entityTableBody tr.entity-row").count()
     assert rows == 1
     assert "sensor.unassigned_temp" in (page.locator("#entityTableBody").text_content() or "")
+
+
+def test_live_sync_to_google_without_restart_modal(page):
+    """Test clicking Sync to Google calls /sync and does not open the restart modal."""
+    sync_called = []
+
+    def handle_sync(route):
+        sync_called.append(True)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "success": True,
+                "status_code": 200,
+                "exposed_count": 2,
+                "agent_users_count": 1,
+                "mode": "storage",
+                "synced_offline": False,
+            }),
+        )
+
+    page.route("**/api/google_assistant_entity_console/sync", handle_sync)
+
+    btn_text = page.locator("#rebuildBtn").text_content() or ""
+    assert "Sync to Google" in btn_text
+
+    page.click("#rebuildBtn")
+    page.wait_for_timeout(300)
+
+    assert len(sync_called) == 1
+    # Restart modal must NOT open on live sync
+    assert page.locator("#restartModal").is_visible() is False
+    assert "Synced 2 entities" in (page.locator("#toast").text_content() or "")
+
+
+def test_google_storage_settings_and_yaml_migration(page):
+    """Test viewing/saving Google Assistant .storage credentials and migrating from YAML."""
+    saved_payloads = []
+    migrated = []
+
+    def handle_google_settings(route):
+        if route.request.method == "POST":
+            saved_payloads.append(json.loads(route.request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "google_settings": {
+                        "project_id": "new-storage-proj",
+                        "report_state": True,
+                        "secure_devices_pin": "5678",
+                        "auto_sync": False,
+                        "has_service_account": True,
+                        "client_email": "ga-sync@test-home-proj.iam.gserviceaccount.com",
+                    },
+                    "runtime": {
+                        "mode": "storage",
+                        "project_id": "new-storage-proj",
+                        "has_service_account": True,
+                        "is_reporting_state": True,
+                        "agent_users_count": 1,
+                    },
+                    "has_legacy_yaml": True,
+                }),
+            )
+        else:
+            route.continue_()
+
+    def handle_migrate_yaml(route):
+        migrated.append(True)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "migrated": True,
+                "yaml_commented_out": True,
+                "project_id": "test-home-proj",
+                "has_service_account": True,
+                "runtime": {"mode": "storage"},
+            }),
+        )
+
+    page.route("**/api/google_assistant_entity_console/google_settings", handle_google_settings)
+    page.route("**/api/google_assistant_entity_console/migrate_yaml", handle_migrate_yaml)
+
+    # Open Settings modal
+    page.click("#openAiSettingsBtn")
+    page.wait_for_timeout(200)
+
+    # Check pre-populated Google Assistant .storage fields
+    assert page.input_value("#gaProjectIdInput") == "test-home-proj"
+    assert page.input_value("#gaPinInput") == "1234"
+    assert page.is_checked("#gaReportStateToggle") is True
+    assert page.is_checked("#gaAutoSyncToggle") is True
+    assert "ga-sync@test-home-proj.iam.gserviceaccount.com" in (
+        page.locator("#gaServiceAccountStatus").text_content() or ""
+    )
+
+    # Trigger one-click Migrate from YAML
+    assert page.locator("#migrateYamlBtn").is_visible() is True
+    page.click("#migrateYamlBtn")
+    page.wait_for_timeout(200)
+    assert len(migrated) == 1
+
+    # Export to YAML for standalone rollback / clean uninstall
+    exported = []
+    page.route(
+        "**/api/google_assistant_entity_console/rebuild",
+        lambda route: (
+            exported.append(True),
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "filename": "gaGen_101726.yaml",
+                    "exposed_count": 2,
+                    "has_include_directive": False,
+                    "required_include": "google_assistant: !include gaGen_101726.yaml",
+                }),
+            ),
+        ),
+    )
+
+    assert page.locator("#exportYamlBtn").is_visible() is True
+    page.click("#exportYamlBtn")
+    page.wait_for_timeout(300)
+    assert len(exported) == 1
+    assert "Exported 2 entities to gaGen_101726.yaml" in (page.locator("#toast").text_content() or "")
+
+    # Update Google settings and save
+    page.fill("#gaProjectIdInput", "new-storage-proj")
+    page.fill("#gaPinInput", "5678")
+    page.uncheck("#gaAutoSyncToggle")
+    page.click("#saveAiSettingsBtn")
+    page.wait_for_timeout(300)
+
+    assert len(saved_payloads) == 1
+    assert saved_payloads[0]["project_id"] == "new-storage-proj"
+    assert saved_payloads[0]["secure_devices_pin"] == "5678"
+    assert saved_payloads[0]["auto_sync"] is False
+
+
 

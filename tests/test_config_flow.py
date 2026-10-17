@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.google_assistant_entity_console import (
+    async_remove_entry,
     async_setup,
     async_setup_entry,
     async_unload_entry,
@@ -23,8 +24,11 @@ from custom_components.google_assistant_entity_console.views import (
     BlocklistAddView,
     BlocklistView,
     EntitiesView,
+    GoogleSettingsView,
+    MigrateYamlView,
     RebuildView,
     RestartView,
+    SyncView,
     UpdateEntityView,
 )
 
@@ -153,8 +157,8 @@ async def test_async_setup_entry_success(lifecycle_hass):
         )
         assert static_path_config.cache_headers is True
 
-        # 2. Verify registration of all 12 API views in exact order
-        assert lifecycle_hass.http.register_view.call_count == 12
+        # 2. Verify registration of all 15 API views in exact order
+        assert lifecycle_hass.http.register_view.call_count == 15
         registered_classes = [
             call.args[0].__class__
             for call in lifecycle_hass.http.register_view.call_args_list
@@ -162,8 +166,11 @@ async def test_async_setup_entry_success(lifecycle_hass):
         expected_classes = [
             EntitiesView,
             UpdateEntityView,
+            SyncView,
             RebuildView,
             RestartView,
+            GoogleSettingsView,
+            MigrateYamlView,
             BlocklistView,
             BlocklistAddView,
             AISettingsView,
@@ -198,7 +205,7 @@ async def test_async_setup_entry_success(lifecycle_hass):
 
 @pytest.mark.anyio
 async def test_async_setup_entry_version_fallback_on_error(lifecycle_hass):
-    """Test async_setup_entry falls back gracefully to version 1.0.3 when loader fails."""
+    """Test async_setup_entry falls back gracefully to version 3.0.0 when loader fails."""
     mock_entry = MagicMock()
 
     with patch(
@@ -213,10 +220,10 @@ async def test_async_setup_entry_version_fallback_on_error(lifecycle_hass):
         assert result is True
 
         panel_kwargs = mock_register_panel.call_args.kwargs
-        assert panel_kwargs["config"]["version"] == "1.0.3"
+        assert panel_kwargs["config"]["version"] == "3.0.0"
         assert (
             panel_kwargs["config"]["_panel_custom"]["js_url"]
-            == "/google_assistant_entity_console/static/panel.js?v=1.0.3"
+            == "/google_assistant_entity_console/static/panel.js?v=3.0.0"
         )
 
 
@@ -262,3 +269,19 @@ async def test_async_unload_entry(lifecycle_hass):
         mock_remove_panel.assert_called_once_with(
             lifecycle_hass, DOMAIN, warn_if_unknown=False
         )
+
+
+@pytest.mark.anyio
+async def test_async_remove_entry(lifecycle_hass):
+    """Test async_remove_entry cleanly uninstalls and cleans up hass.data[DOMAIN]."""
+    mock_entry = MagicMock()
+    lifecycle_hass.data[DOMAIN] = {"some": "runtime_data"}
+
+    with patch(
+        "custom_components.google_assistant_entity_console.async_remove_panel"
+    ) as mock_remove_panel:
+        await async_remove_entry(lifecycle_hass, mock_entry)
+        mock_remove_panel.assert_called_once_with(
+            lifecycle_hass, DOMAIN, warn_if_unknown=False
+        )
+        assert DOMAIN not in lifecycle_hass.data

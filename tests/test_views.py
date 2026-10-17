@@ -1550,3 +1550,160 @@ async def test_computed_name_handling(mock_hass):
         # The COMPUTED_NAME alias should be filtered out, leaving only the string alias
         assert ent["aliases"] == ["kitchen_alias"]
 
+
+# ===========================================================================
+# 11. .storage Live Sync, GoogleSettingsView, and MigrateYamlView
+# ===========================================================================
+
+@pytest.mark.anyio
+async def test_sync_view_post_triggers_live_homegraph_sync(mock_hass, tmp_path):
+    """Verifies SyncView triggers runtime.async_sync_to_google without generating YAML or restarting."""
+    from custom_components.google_assistant_entity_console.views import SyncView
+
+    mock_hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+
+    sample_entities = [
+        {
+            "entity_id": "light.kitchen",
+            "display_name": "Kitchen Light",
+            "aliases": ["Island Light"],
+            "area": "Kitchen",
+            "floor": "Main Floor",
+            "domain": "light",
+            "should_expose": True,
+        },
+        {
+            "entity_id": "switch.unexposed",
+            "display_name": "Hidden Switch",
+            "aliases": [],
+            "area": "TBA",
+            "floor": "TBA",
+            "domain": "switch",
+            "should_expose": False,
+        },
+    ]
+
+    mock_runtime = MagicMock()
+    mock_runtime.async_sync_to_google = AsyncMock(
+        return_value={
+            "success": True,
+            "status_code": 200,
+            "exposed_count": 1,
+            "agent_users_count": 1,
+            "mode": "storage",
+            "synced_offline": False,
+        }
+    )
+
+    view = SyncView()
+    request = MagicMock()
+    request.app = {"hass": mock_hass}
+
+    with (
+        patch(
+            "custom_components.google_assistant_entity_console.views.async_fetch_entities_data",
+            return_value=sample_entities,
+        ),
+        patch(
+            "custom_components.google_assistant_entity_console.views.async_get_runtime",
+            AsyncMock(return_value=mock_runtime),
+        ),
+    ):
+        resp = await view.post(request)
+        assert resp.status == 200
+        data = json.loads(resp.body.decode())
+        assert data["success"] is True
+        assert data["exposed_count"] == 1
+        assert data["mode"] == "storage"
+        mock_runtime.async_sync_to_google.assert_awaited_once_with(
+            {
+                "light.kitchen": {
+                    "expose": True,
+                    "name": "Kitchen Light",
+                    "aliases": ["Island Light"],
+                    "room": "Kitchen",
+                }
+            }
+        )
+
+
+@pytest.mark.anyio
+async def test_google_settings_view_get_and_post(mock_hass, tmp_path):
+    """Verifies GoogleSettingsView GET redacts private_key and POST updates .storage + runtime."""
+    from custom_components.google_assistant_entity_console.views import (
+        GoogleSettingsView,
+    )
+
+    mock_hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+
+    view = GoogleSettingsView()
+    post_req = AsyncMock()
+    post_req.app = {"hass": mock_hass}
+    post_req.json.return_value = {
+        "project_id": "home-assistant-v3",
+        "report_state": True,
+        "secure_devices_pin": "2468",
+        "auto_sync": True,
+        "service_account": {
+            "client_email": "bot@home-assistant-v3.iam.gserviceaccount.com",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nSECRET\n-----END PRIVATE KEY-----",
+        },
+    }
+
+    with patch(
+        "custom_components.google_assistant_entity_console.views.async_fetch_entities_data",
+        return_value=[],
+    ):
+        post_resp = await view.post(post_req)
+        assert post_resp.status == 200
+        post_data = json.loads(post_resp.body.decode())
+        assert post_data["success"] is True
+        assert post_data["google_settings"]["project_id"] == "home-assistant-v3"
+        assert (
+            post_data["google_settings"]["client_email"]
+            == "bot@home-assistant-v3.iam.gserviceaccount.com"
+        )
+        assert post_data["google_settings"]["has_service_account"] is True
+        assert "private_key" not in post_data["google_settings"]
+
+        get_req = MagicMock()
+        get_req.app = {"hass": mock_hass}
+        get_resp = await view.get(get_req)
+        assert get_resp.status == 200
+        get_data = json.loads(get_resp.body.decode())
+        assert get_data["google_settings"]["project_id"] == "home-assistant-v3"
+        assert get_data["google_settings"]["secure_devices_pin"] == "2468"
+        assert get_data["google_settings"]["auto_sync"] is True
+        assert get_data["google_settings"]["has_service_account"] is True
+        assert "private_key" not in get_data["google_settings"]
+
+
+@pytest.mark.anyio
+async def test_migrate_yaml_view_post(mock_hass, tmp_path):
+    """Verifies MigrateYamlView comments out configuration.yaml and switches runtime to storage mode."""
+    from custom_components.google_assistant_entity_console.views import MigrateYamlView
+
+    (tmp_path / "gaGen_101726.yaml").write_text(
+        "project_id: migrated-proj\nreport_state: true\n", encoding="utf-8"
+    )
+    (tmp_path / "configuration.yaml").write_text(
+        "google_assistant: !include gaGen_101726.yaml\n", encoding="utf-8"
+    )
+    mock_hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+
+    view = MigrateYamlView()
+    req = MagicMock()
+    req.app = {"hass": mock_hass}
+
+    with patch(
+        "custom_components.google_assistant_entity_console.views.async_fetch_entities_data",
+        return_value=[],
+    ):
+        resp = await view.post(req)
+        assert resp.status == 200
+        data = json.loads(resp.body.decode())
+        assert data["success"] is True
+        assert data["commented_out"] is True
+        assert data["project_id"] == "migrated-proj"
+
+
