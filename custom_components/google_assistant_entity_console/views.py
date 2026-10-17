@@ -531,9 +531,24 @@ class RebuildView(HomeAssistantView):
                     existing_content = await hass.async_add_executor_job(_read_file_content, existing_filepath)
                 except Exception as err:
                     _LOGGER.warning("Failed to read existing YAML header from %s: %s", existing_filepath, err)
-                    existing_content = ""
-
             header_lines = extract_yaml_header(existing_content)
+            if header_lines == DEFAULT_YAML_HEADER:
+                try:
+                    store = await async_get_store(hass)
+                    gs = store.google_settings
+                    if gs.get("project_id"):
+                        dyn_header = [
+                            f"project_id: {gs['project_id']}",
+                            "service_account: !include SERVICE_ACCOUNT.json",
+                            f"report_state: {str(gs.get('report_state', True)).lower()}",
+                            "expose_by_default: false",
+                        ]
+                        if gs.get("secure_devices_pin"):
+                            dyn_header.append(f"secure_devices_pin: {gs['secure_devices_pin']}")
+                        header_lines = dyn_header
+                except Exception:
+                    pass
+
             yaml_lines = list(header_lines) + ["entity_config:"]
 
             current_floor = None

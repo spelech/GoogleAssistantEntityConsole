@@ -468,6 +468,32 @@ def test_google_storage_settings_and_yaml_migration(page):
     page.wait_for_timeout(200)
     assert len(migrated) == 1
 
+    # Export to YAML for standalone rollback / clean uninstall
+    exported = []
+    page.route(
+        "**/api/google_assistant_entity_console/rebuild",
+        lambda route: (
+            exported.append(True),
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "success": True,
+                    "filename": "gaGen_101726.yaml",
+                    "exposed_count": 2,
+                    "has_include_directive": False,
+                    "required_include": "google_assistant: !include gaGen_101726.yaml",
+                }),
+            ),
+        ),
+    )
+
+    assert page.locator("#exportYamlBtn").is_visible() is True
+    page.click("#exportYamlBtn")
+    page.wait_for_timeout(300)
+    assert len(exported) == 1
+    assert "Exported 2 entities to gaGen_101726.yaml" in (page.locator("#toast").text_content() or "")
+
     # Update Google settings and save
     page.fill("#gaProjectIdInput", "new-storage-proj")
     page.fill("#gaPinInput", "5678")
@@ -479,4 +505,6 @@ def test_google_storage_settings_and_yaml_migration(page):
     assert saved_payloads[0]["project_id"] == "new-storage-proj"
     assert saved_payloads[0]["secure_devices_pin"] == "5678"
     assert saved_payloads[0]["auto_sync"] is False
+
+
 

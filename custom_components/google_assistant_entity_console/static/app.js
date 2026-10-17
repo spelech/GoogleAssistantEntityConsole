@@ -1977,6 +1977,36 @@ function setupAiEventListeners() {
             }
         });
     }
+
+    const exportYamlBtn = document.getElementById('exportYamlBtn');
+    if (exportYamlBtn) {
+        exportYamlBtn.addEventListener('click', async () => {
+            exportYamlBtn.disabled = true;
+            const originalHtml = exportYamlBtn.innerHTML;
+            exportYamlBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Exporting...</span>';
+            try {
+                const response = await authFetch('/api/google_assistant_entity_console/rebuild', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({})
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Export failed');
+                }
+                const data = await response.json();
+                showToast(`Exported ${data.exposed_count} entities to ${data.filename}! Add 'google_assistant: !include ${data.filename}' to configuration.yaml if uninstalling.`, 'success');
+            } catch (error) {
+                showToast('Error exporting YAML: ' + error.message, 'error');
+            } finally {
+                exportYamlBtn.disabled = false;
+                exportYamlBtn.innerHTML = originalHtml;
+            }
+        });
+    }
     
     const closeSettings = () => {
         if (aiSettingsModal) aiSettingsModal.style.display = 'none';

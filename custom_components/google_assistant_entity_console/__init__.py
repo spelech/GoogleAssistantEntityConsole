@@ -119,3 +119,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Unloading Google Assistant Entity Console config entry")
     async_remove_panel(hass, DOMAIN, warn_if_unknown=False)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle clean removal / uninstallation of the integration entry."""
+    _LOGGER.info("Removing Google Assistant Entity Console config entry")
+    async_remove_panel(hass, DOMAIN, warn_if_unknown=False)
+    hass.data.pop(DOMAIN, None)

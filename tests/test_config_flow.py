@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.google_assistant_entity_console import (
+    async_remove_entry,
     async_setup,
     async_setup_entry,
     async_unload_entry,
@@ -268,3 +269,19 @@ async def test_async_unload_entry(lifecycle_hass):
         mock_remove_panel.assert_called_once_with(
             lifecycle_hass, DOMAIN, warn_if_unknown=False
         )
+
+
+@pytest.mark.anyio
+async def test_async_remove_entry(lifecycle_hass):
+    """Test async_remove_entry cleanly uninstalls and cleans up hass.data[DOMAIN]."""
+    mock_entry = MagicMock()
+    lifecycle_hass.data[DOMAIN] = {"some": "runtime_data"}
+
+    with patch(
+        "custom_components.google_assistant_entity_console.async_remove_panel"
+    ) as mock_remove_panel:
+        await async_remove_entry(lifecycle_hass, mock_entry)
+        mock_remove_panel.assert_called_once_with(
+            lifecycle_hass, DOMAIN, warn_if_unknown=False
+        )
+        assert DOMAIN not in lifecycle_hass.data
