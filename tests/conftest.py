@@ -124,8 +124,15 @@ except ImportError:
         ):
             return {"type": "form", "step_id": step_id, "errors": errors}
 
+    class ConfigEntryState:
+        LOADED = "loaded"
+        NOT_LOADED = "not_loaded"
+        SETUP_ERROR = "setup_error"
+
     config_entries.ConfigEntry = ConfigEntry
     config_entries.ConfigFlow = ConfigFlow
+    config_entries.ConfigEntryState = ConfigEntryState
+    config_entries.SOURCE_IMPORT = "import"
 
     # components.http
     http = register_mock("homeassistant.components.http")
@@ -160,12 +167,76 @@ except ImportError:
     conversation.async_converse = AsyncMock()
     conversation.async_get_agent_info = MagicMock()
 
+    # components.google_assistant
+    ga_const = register_mock("homeassistant.components.google_assistant.const")
+    ga_const.DOMAIN = "google_assistant"
+    ga_const.DATA_CONFIG = "google_assistant_config"
+    ga_const.CONF_PROJECT_ID = "project_id"
+    ga_const.CONF_EXPOSE_BY_DEFAULT = "expose_by_default"
+    ga_const.CONF_EXPOSED_DOMAINS = "exposed_domains"
+    ga_const.CONF_ENTITY_CONFIG = "entity_config"
+    ga_const.CONF_REPORT_STATE = "report_state"
+    ga_const.CONF_SECURE_DEVICES_PIN = "secure_devices_pin"
+    ga_const.CONF_SERVICE_ACCOUNT = "service_account"
+    ga_const.DEFAULT_EXPOSED_DOMAINS = [
+        "alarm_control_panel", "button", "camera", "climate", "cover", "fan",
+        "group", "humidifier", "input_boolean", "input_button", "input_select",
+        "light", "lawn_mower", "lock", "media_player", "scene", "script",
+        "select", "switch", "vacuum", "valve", "water_heater",
+    ]
+    ga_const.SERVICE_REQUEST_SYNC = "request_sync"
+
+    ga_http = register_mock("homeassistant.components.google_assistant.http")
+
+    class _MockGoogleConfig:
+        def __init__(self, hass, config):
+            self.hass = hass
+            self._config = config
+            self._access_token = None
+            self.is_reporting_state = False
+
+        @property
+        def should_report_state(self):
+            return bool(self._config.get("report_state", False))
+
+        async def async_initialize(self):
+            pass
+
+        def async_enable_report_state(self):
+            self.is_reporting_state = True
+
+        def async_disable_report_state(self):
+            self.is_reporting_state = False
+
+        def async_get_agent_users(self):
+            return {}
+
+        def async_schedule_google_sync_all(self):
+            pass
+
+        async def async_sync_entities(self, agent_user_id: str):
+            return 200
+
+        async def async_sync_entities_all(self):
+            return 200
+
+    class _MockGoogleAssistantView(HomeAssistantView):
+        url = "/api/google_assistant"
+        name = "api:google_assistant"
+
+        def __init__(self, config):
+            super().__init__()
+            self.config = config
+
+    ga_http.GoogleConfig = _MockGoogleConfig
+    ga_http.GoogleAssistantView = _MockGoogleAssistantView
+
     # loader
     loader = register_mock("homeassistant.loader")
 
     async def async_get_integration(hass, domain):
         integ = MagicMock()
-        integ.version = "1.0.3"
+        integ.version = "3.0.0"
         return integ
 
     loader.async_get_integration = async_get_integration
@@ -184,6 +255,23 @@ except ImportError:
     floor_reg_mod = register_mock("homeassistant.helpers.floor_registry")
     aiohttp_client_mod = register_mock("homeassistant.helpers.aiohttp_client")
     aiohttp_client_mod.async_get_clientsession = MagicMock()
+    storage_mod = register_mock("homeassistant.helpers.storage")
+
+    class Store:
+        def __init__(self, hass, version, key, **kwargs):
+            self.hass = hass
+            self.version = version
+            self.key = key
+            self._data = None
+
+        async def async_load(self):
+            return self._data
+
+        async def async_save(self, data):
+            import copy
+            self._data = copy.deepcopy(data)
+
+    storage_mod.Store = Store
 
     area_reg_mod.async_get = MagicMock(return_value=MagicMock(async_list_areas=MagicMock(return_value=[])))
     dev_reg_mod.async_get = MagicMock(return_value=MagicMock(devices={}))
@@ -195,6 +283,7 @@ except ImportError:
     helpers.entity_registry = ent_reg_mod
     helpers.floor_registry = floor_reg_mod
     helpers.aiohttp_client = aiohttp_client_mod
+    helpers.storage = storage_mod
 
 
 # ---------------------------------------------------------------------------
