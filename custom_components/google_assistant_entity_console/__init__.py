@@ -9,6 +9,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .runtime import async_get_runtime
+from .store import async_get_store
 from .views import (
     AIGenerateNicknamesView,
     AIGenerateSingleEntityNicknameView,
@@ -19,16 +21,22 @@ from .views import (
     BlocklistAddView,
     BlocklistView,
     EntitiesView,
+    GoogleSettingsView,
+    MigrateYamlView,
     RebuildView,
     RestartView,
+    SyncView,
     UpdateEntityView,
+    async_build_entity_config_map,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Google Assistant Entity Console component (legacy YAML fallback)."""
     return True
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Google Assistant Entity Console from a config entry."""
@@ -36,28 +44,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Read version natively via Home Assistant loader for cache busting
     from homeassistant.loader import async_get_integration
+
     try:
         integration = await async_get_integration(hass, DOMAIN)
         version = integration.version
     except Exception as err:
         _LOGGER.error("Failed to read version from integration loader: %s", err)
-        version = "1.0.3"
+        version = "3.0.0"
 
-    # 1. Register static files directory
-    static_dir = hass.config.path("custom_components/google_assistant_entity_console/static")
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(
-            "/google_assistant_entity_console/static",
-            static_dir,
-            True,
-        )
-    ])
+    # 1. Initialize .storage store and zero-reboot GoogleConfig runtime manager
+    try:
+        await async_get_store(hass)
+        runtime = await async_get_runtime(hass)
+        entity_config = await async_build_entity_config_map(hass)
+        await runtime.async_initialize(entity_config)
+    except Exception as err:
+        _LOGGER.warning("Deferred runtime initialization: %s", err)
 
-    # 2. Register API views
+    # 2. Register static files directory
+    static_dir = hass.config.path(
+        "custom_components/google_assistant_entity_console/static"
+    )
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                "/google_assistant_entity_console/static",
+                static_dir,
+                True,
+            )
+        ]
+    )
+
+    # 3. Register API views
     hass.http.register_view(EntitiesView())
     hass.http.register_view(UpdateEntityView())
+    hass.http.register_view(SyncView())
     hass.http.register_view(RebuildView())
     hass.http.register_view(RestartView())
+    hass.http.register_view(GoogleSettingsView())
+    hass.http.register_view(MigrateYamlView())
     hass.http.register_view(BlocklistView())
     hass.http.register_view(BlocklistAddView())
     hass.http.register_view(AISettingsView())
@@ -67,7 +92,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(AISuggestExposureView())
     hass.http.register_view(AIGenerateSingleEntityNicknameView())
 
-    # 3. Register Sidebar Panel
+    # 4. Register Sidebar Panel
     async_remove_panel(hass, DOMAIN, warn_if_unknown=False)
 
     async_register_built_in_panel(
@@ -87,6 +112,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     return True
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""

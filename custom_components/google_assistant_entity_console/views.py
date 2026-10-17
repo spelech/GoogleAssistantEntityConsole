@@ -18,7 +18,9 @@ from homeassistant.helpers import (
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import DATA_RUNTIME, DATA_STORE, DOMAIN
+from .runtime import async_get_runtime
+from .store import async_get_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,11 +131,19 @@ def save_blocklist(hass: HomeAssistant, blocklist: list) -> None:
 
 
 async def async_load_blocklist(hass: HomeAssistant) -> list:
-    return await hass.async_add_executor_job(load_blocklist, hass)
+    data = await hass.async_add_executor_job(load_blocklist, hass)
+    if not data and isinstance(getattr(hass, "data", None), dict) and DATA_STORE in hass.data.get(DOMAIN, {}):
+        store = await async_get_store(hass)
+        if store.blocklist:
+            return list(store.blocklist)
+    return data
 
 
 async def async_save_blocklist(hass: HomeAssistant, blocklist: list) -> None:
     await hass.async_add_executor_job(save_blocklist, hass, blocklist)
+    if isinstance(getattr(hass, "data", None), dict) and DATA_STORE in hass.data.get(DOMAIN, {}):
+        store = await async_get_store(hass)
+        await store.async_set_blocklist(blocklist)
 
 
 def _read_file_content(path):
@@ -221,9 +231,16 @@ async def async_fetch_entities_data(hass: HomeAssistant):
     # Build floor name mapping
     floor_map = {floor.floor_id: floor.name for floor in floor_reg.async_list_floors()}
 
-    # Load currently exposed YAML config to compare
+    # Load currently exposed YAML config or .storage synced_entities to compare
     yaml_filename = await get_current_yaml_filename(hass)
     yaml_exposed = await load_yaml_exposed_entities(hass, yaml_filename)
+    if (
+        isinstance(getattr(hass, "data", None), dict)
+        and DATA_STORE in hass.data.get(DOMAIN, {})
+    ):
+        store = await async_get_store(hass)
+        if store.synced_entities:
+            yaml_exposed = store.synced_entities
 
     # Build device mappings
     device_area_map = {}
@@ -313,7 +330,7 @@ async def async_fetch_entities_data(hass: HomeAssistant):
         if entry.options and "conversation" in entry.options:
             should_expose = entry.options["conversation"].get("should_expose", False)
 
-        # Compare with what is in the yaml file
+        # Compare with what is in the yaml file / synced_entities store
         yaml_exp = entity_id in yaml_exposed
 
         # Clean/filter aliases (strictly allow only valid string values)
@@ -351,6 +368,27 @@ async def async_fetch_entities_data(hass: HomeAssistant):
     return active_entities
 
 
+async def async_build_entity_config_map(
+    hass: HomeAssistant,
+) -> dict[str, dict[str, Any]]:
+    """Build the entity_config map expected by HA Core's GoogleConfig from active entities."""
+    entities = await async_fetch_entities_data(hass)
+    entity_config: dict[str, dict[str, Any]] = {}
+    for ent in entities:
+        if not ent.get("should_expose"):
+            continue
+        cfg: dict[str, Any] = {
+            "expose": True,
+            "name": ent["display_name"],
+        }
+        if ent.get("aliases"):
+            cfg["aliases"] = list(ent["aliases"])
+        if ent.get("area") and ent["area"] != "TBA":
+            cfg["room"] = ent["area"]
+        entity_config[ent["entity_id"]] = cfg
+    return entity_config
+
+
 class EntitiesView(HomeAssistantView):
     url = "/api/google_assistant_entity_console/entities"
     name = "api:google_assistant_entity_console:entities"
@@ -369,10 +407,29 @@ class EntitiesView(HomeAssistantView):
             except Exception:
                 version = "Unknown"
 
+            storage_mode = "storage"
+            project_id = ""
+            has_legacy_yaml = False
+            auto_sync = False
+            try:
+                if isinstance(getattr(hass, "data", None), dict) and DOMAIN in hass.data:
+                    store = await async_get_store(hass)
+                    runtime = await async_get_runtime(hass)
+                    storage_mode = runtime.mode
+                    project_id = store.google_settings.get("project_id", "")
+                    auto_sync = bool(store.google_settings.get("auto_sync", False))
+                    has_legacy_yaml = await store.async_has_legacy_yaml()
+            except Exception:
+                pass
+
             return self.json({
                 "entities": entities,
                 "yaml_filename": yaml_filename,
-                "version": version
+                "version": version,
+                "storage_mode": storage_mode,
+                "project_id": project_id,
+                "has_legacy_yaml": has_legacy_yaml,
+                "auto_sync": auto_sync,
             })
         except Exception as err:
             _LOGGER.exception("Failed to fetch entities registry")
@@ -418,6 +475,20 @@ class UpdateEntityView(HomeAssistantView):
                 "conversation",
                 {"should_expose": bool(should_expose)}
             )
+
+            # Immediately refresh in-memory GoogleConfig if runtime is active
+            if (
+                isinstance(getattr(hass, "data", None), dict)
+                and DATA_RUNTIME in hass.data.get(DOMAIN, {})
+            ):
+                try:
+                    runtime = await async_get_runtime(hass)
+                    entity_config = await async_build_entity_config_map(hass)
+                    await runtime.async_refresh_memory_config(
+                        entity_config, schedule_auto_sync=True
+                    )
+                except Exception as sync_err:
+                    _LOGGER.debug("Live memory refresh skipped: %s", sync_err)
 
             return self.json({"success": True})
         except Exception as err:
@@ -552,6 +623,119 @@ class RebuildView(HomeAssistantView):
             return self.json({"error": str(err)}, status_code=500)
 
 
+class SyncView(HomeAssistantView):
+    url = "/api/google_assistant_entity_console/sync"
+    name = "api:google_assistant_entity_console:sync"
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            runtime = await async_get_runtime(hass)
+            entity_config = await async_build_entity_config_map(hass)
+            result = await runtime.async_sync_to_google(entity_config)
+            return self.json(result)
+        except Exception as err:
+            _LOGGER.exception("Failed to sync entities to Google")
+            return self.json({"error": str(err)}, status_code=500)
+
+
+def _serialize_google_settings(store_settings: dict[str, Any], status_summary: dict[str, Any], has_legacy_yaml: bool) -> dict[str, Any]:
+    sa = store_settings.get("service_account") or {}
+    client_email = sa.get("client_email", "") if isinstance(sa, dict) else ""
+    has_sa = bool(isinstance(sa, dict) and sa.get("client_email") and sa.get("private_key"))
+    return {
+        "project_id": store_settings.get("project_id", ""),
+        "report_state": bool(store_settings.get("report_state", True)),
+        "secure_devices_pin": store_settings.get("secure_devices_pin", ""),
+        "auto_sync": bool(store_settings.get("auto_sync", False)),
+        "client_email": client_email,
+        "has_service_account": has_sa,
+        "mode": status_summary.get("mode", "storage"),
+        "is_reporting_state": status_summary.get("is_reporting_state", False),
+        "agent_users_count": status_summary.get("agent_users_count", 0),
+        "has_legacy_yaml": has_legacy_yaml,
+    }
+
+
+class GoogleSettingsView(HomeAssistantView):
+    url = "/api/google_assistant_entity_console/google_settings"
+    name = "api:google_assistant_entity_console:google_settings"
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            store = await async_get_store(hass)
+            runtime = await async_get_runtime(hass)
+            has_legacy_yaml = await store.async_has_legacy_yaml()
+            payload = _serialize_google_settings(
+                store.google_settings,
+                runtime.get_status_summary(),
+                has_legacy_yaml,
+            )
+            return self.json({"google_settings": payload})
+        except Exception as err:
+            _LOGGER.exception("Failed to load Google Assistant settings")
+            return self.json({"error": str(err)}, status_code=500)
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                return self.json({"error": "Invalid JSON body"}, status_code=400)
+            updates = body.get("google_settings", body)
+            if not isinstance(updates, dict):
+                return self.json({"error": "google_settings must be an object"}, status_code=400)
+
+            store = await async_get_store(hass)
+            try:
+                await store.async_update_google_settings(updates)
+            except ValueError as val_err:
+                return self.json({"error": str(val_err)}, status_code=400)
+
+            runtime = await async_get_runtime(hass)
+            entity_config = await async_build_entity_config_map(hass)
+            await runtime.async_refresh_memory_config(entity_config)
+            has_legacy_yaml = await store.async_has_legacy_yaml()
+            payload = _serialize_google_settings(
+                store.google_settings,
+                runtime.get_status_summary(),
+                has_legacy_yaml,
+            )
+            return self.json({"success": True, "google_settings": payload})
+        except Exception as err:
+            _LOGGER.exception("Failed to save Google Assistant settings")
+            return self.json({"error": str(err)}, status_code=500)
+
+
+class MigrateYamlView(HomeAssistantView):
+    url = "/api/google_assistant_entity_console/migrate_yaml"
+    name = "api:google_assistant_entity_console:migrate_yaml"
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        try:
+            store = await async_get_store(hass)
+            mig_res = await store.async_migrate_and_disable_yaml()
+            runtime = await async_get_runtime(hass)
+            entity_config = await async_build_entity_config_map(hass)
+            await runtime.async_switch_to_storage_mode(entity_config)
+            has_legacy_yaml = await store.async_has_legacy_yaml()
+            return self.json({
+                "success": True,
+                "commented_out": mig_res["commented_out"],
+                "project_id": mig_res["project_id"],
+                "google_settings": _serialize_google_settings(
+                    store.google_settings,
+                    runtime.get_status_summary(),
+                    has_legacy_yaml,
+                ),
+            })
+        except Exception as err:
+            _LOGGER.exception("Failed to migrate YAML to .storage")
+            return self.json({"error": str(err)}, status_code=500)
+
+
 class RestartView(HomeAssistantView):
     url = "/api/google_assistant_entity_console/restart"
     name = "api:google_assistant_entity_console:restart"
@@ -648,11 +832,19 @@ def save_ai_settings(hass: HomeAssistant, settings: dict) -> None:
 
 
 async def async_load_ai_settings(hass: HomeAssistant) -> dict:
-    return await hass.async_add_executor_job(load_ai_settings, hass)
+    data = await hass.async_add_executor_job(load_ai_settings, hass)
+    if not data and isinstance(getattr(hass, "data", None), dict) and DATA_STORE in hass.data.get(DOMAIN, {}):
+        store = await async_get_store(hass)
+        if store.ai_settings:
+            return dict(store.ai_settings)
+    return data
 
 
 async def async_save_ai_settings(hass: HomeAssistant, settings: dict) -> None:
     await hass.async_add_executor_job(save_ai_settings, hass, settings)
+    if isinstance(getattr(hass, "data", None), dict) and DATA_STORE in hass.data.get(DOMAIN, {}):
+        store = await async_get_store(hass)
+        await store.async_set_ai_settings(settings)
 
 
 
