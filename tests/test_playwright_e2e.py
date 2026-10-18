@@ -507,4 +507,76 @@ def test_google_storage_settings_and_yaml_migration(page):
     assert saved_payloads[0]["auto_sync"] is False
 
 
+def test_ha_drawer_sidebar_frame_containment(static_server):
+    """Verify google-assistant-entity-console-panel stays strictly inside ha-drawer .app-content and does not bleed beneath the 256px sidebar."""
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(headless=True)
+        except Exception as e:
+            pytest.skip(f"Chromium browser could not be launched: {e}")
+
+        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        pg = context.new_page()
+        panel_js = (STATIC_DIR / "panel.js").read_text(encoding="utf-8")
+
+        pg.set_content(
+            """
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <style>
+                  html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+                  .layout { height: 100%; }
+                  .sidebar-shell {
+                    width: 256px;
+                    height: 100%;
+                    position: fixed;
+                    left: 0;
+                    top: 0;
+                    z-index: 6;
+                  }
+                  .app-content {
+                    overflow: unset;
+                    min-width: 0;
+                    box-sizing: border-box;
+                    width: 100%;
+                    height: 100%;
+                    padding-inline-start: 256px;
+                  }
+                  ha-panel-custom {
+                    display: block;
+                    box-sizing: border-box;
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="layout">
+                  <div class="sidebar-shell" id="haSidebar"></div>
+                  <div class="app-content" id="haAppContent">
+                    <ha-panel-custom id="haPanelCustom"></ha-panel-custom>
+                  </div>
+                </div>
+              </body>
+            </html>
+            """
+        )
+        pg.add_script_tag(content=panel_js)
+        rect = pg.evaluate(
+            """() => {
+                const container = document.getElementById("haPanelCustom");
+                const el = document.createElement("google-assistant-entity-console-panel");
+                container.appendChild(el);
+                const r = el.getBoundingClientRect();
+                return { x: r.x, y: r.y, width: r.width, height: r.height, position: getComputedStyle(el).position };
+            }"""
+        )
+        assert rect["position"] == "relative"
+        assert rect["x"] == 256
+        assert rect["width"] == 1184
+        assert rect["height"] == 900
+
+        context.close()
+        browser.close()
+
+
 

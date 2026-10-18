@@ -19,13 +19,15 @@ if (!customElements.get('google-assistant-entity-console-panel')) {
 
     connectedCallback() {
       this.style.display = 'block';
-      this.style.position = 'absolute';
-      this.style.top = '0';
-      this.style.left = '0';
+      this.style.position = 'relative';
       this.style.width = '100%';
-      this.style.height = '100%';
+      this.style.maxWidth = '100%';
+      this.style.height = 'calc(100vh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px))';
       this.style.overflow = 'hidden';
       this.style.boxSizing = 'border-box';
+      this.style.isolation = 'isolate';
+      this.style.zIndex = '1';
+      this.style.contain = 'layout paint';
       window.addEventListener('message', this._messageListener);
     }
 
