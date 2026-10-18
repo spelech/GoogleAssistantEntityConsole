@@ -419,7 +419,7 @@ function renderSidebar() {
     const totalCount = entities.length;
     const exposedCount = entities.filter(e => e.should_expose || e.yaml_exposed).length;
     const unexposedCount = totalCount - exposedCount;
-    const overridesCount = entities.filter(e => (e.aliases && e.aliases.length > 0) || (e.display_name && e.display_name !== e.original_name)).length;
+    const overridesCount = entities.filter(e => e.aliases && e.aliases.length > 0).length;
 
     if (countAllEl) countAllEl.textContent = totalCount;
     if (countExposedEl) countExposedEl.textContent = exposedCount;
@@ -565,7 +565,7 @@ function updateBreadcrumbs() {
     if (activeFilters.exposure !== 'all') {
         let label = 'Exposed';
         if (activeFilters.exposure === 'unexposed') label = 'Not Exposed';
-        else if (activeFilters.exposure === 'overrides') label = 'Custom Overrides';
+        else if (activeFilters.exposure === 'overrides') label = 'Has Voice Aliases';
         chips.push({
             type: 'exposure',
             html: `<strong>Exposure:</strong> ${escapeHtml(label)}`
@@ -747,13 +747,13 @@ function applyFilters() {
     const effectiveDomain = specifiers.domain || (activeFilters.domain ? activeFilters.domain.toLowerCase() : null);
 
     filteredEntities = entities.filter(e => {
-        // 1. Exposure filter (from sidebar OR search specifier is:exposed / not:exposed / is:override)
+        // 1. Exposure filter (from sidebar OR search specifier is:exposed / not:exposed / has:aliases)
         if (effectiveExposure) {
             if (effectiveExposure === 'exposed' && !(e.should_expose || e.yaml_exposed)) return false;
             if (effectiveExposure === 'unexposed' && (e.should_expose || e.yaml_exposed)) return false;
             if (effectiveExposure === 'overrides') {
-                const hasOverrides = (e.aliases && e.aliases.length > 0) || (e.display_name && e.display_name !== e.original_name);
-                if (!hasOverrides) return false;
+                const hasAliases = e.aliases && e.aliases.length > 0;
+                if (!hasAliases) return false;
             }
         }
 
