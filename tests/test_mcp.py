@@ -410,6 +410,64 @@ async def test_mcp_call_get_google_assistant_status_fields(mock_hass):
 
 
 @pytest.mark.asyncio
+async def test_mcp_call_get_google_assistant_status_blocklist_parity(mock_hass):
+    """Test get_google_assistant_status blocklisted_count filters out disabled and hidden entities."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    entry_active = MagicMock()
+    entry_active.entity_id = "sensor.active_battery"
+    entry_active.disabled_by = None
+    entry_active.hidden_by = None
+
+    entry_disabled = MagicMock()
+    entry_disabled.entity_id = "sensor.disabled_battery"
+    entry_disabled.disabled_by = "user"
+    entry_disabled.hidden_by = None
+
+    entry_hidden = MagicMock()
+    entry_hidden.entity_id = "sensor.hidden_battery"
+    entry_hidden.disabled_by = None
+    entry_hidden.hidden_by = "integration"
+
+    mock_ent_reg = MagicMock()
+    mock_ent_reg.entities = {
+        "sensor.active_battery": entry_active,
+        "sensor.disabled_battery": entry_disabled,
+        "sensor.hidden_battery": entry_hidden,
+    }
+
+    mock_store = MagicMock()
+    mock_store.google_settings = {}
+    mock_store.synced_entities = {}
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_get_store",
+        AsyncMock(return_value=mock_store),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_fetch_entities_data",
+        AsyncMock(return_value=[]),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_load_blocklist",
+        return_value=[r".*_battery$"],
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.entity_registry.async_get",
+        return_value=mock_ent_reg,
+    ):
+        req = {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {"name": "get_google_assistant_status", "arguments": {}},
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        assert res["jsonrpc"] == "2.0"
+        status = json.loads(res["result"]["content"][0]["text"])
+        # Only active_battery should be counted (1), not disabled or hidden (total 3 matching regex)
+        assert status["blocklisted_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_mcp_call_list_entities_blocked_exposure_status(mock_hass):
     """Test list_entities returns blocked entities when exposure_status='blocked'."""
     import json
@@ -635,6 +693,20 @@ async def test_mcp_call_set_entity_exposure_invalid_args(mock_hass):
     }
     res2 = await async_handle_mcp_payload(mock_hass, req2)
     assert res2["result"].get("isError") is True
+
+    # Empty entity_ids list
+    req3 = {
+        "jsonrpc": "2.0",
+        "id": 204,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_exposure",
+            "arguments": {"entity_ids": [], "exposed": True},
+        },
+    }
+    res3 = await async_handle_mcp_payload(mock_hass, req3)
+    assert res3["result"].get("isError") is True
+    assert "Argument 'entity_ids' must contain at least one entity ID" in res3["result"]["content"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -913,6 +985,7 @@ async def test_mcp_view_attributes():
 async def test_mcp_view_post_json(mock_hass):
     """Test valid JSON-RPC POST returns 200 with Mcp-Protocol-Version header and JSON body."""
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
@@ -940,6 +1013,7 @@ async def test_mcp_view_post_json(mock_hass):
 async def test_mcp_view_post_invalid_json(mock_hass):
     """Test invalid JSON POST returns HTTP 400 with -32700 parse error."""
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
@@ -969,6 +1043,7 @@ async def test_mcp_view_post_sse_stream(mock_hass):
     """Test Accept: text/event-stream returns 200 with SSE formatted event."""
     import json
     from unittest.mock import patch
+
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
@@ -1021,6 +1096,7 @@ async def test_mcp_view_post_sse_stream(mock_hass):
 async def test_mcp_view_post_notification_204(mock_hass):
     """Test JSON-RPC notification returns HTTP 204 No Content."""
     import json
+
     from aiohttp import web
     from aiohttp.test_utils import make_mocked_request
 
@@ -1044,9 +1120,45 @@ async def test_mcp_view_post_notification_204(mock_hass):
 
 
 @pytest.mark.asyncio
+async def test_mcp_view_post_internal_error(mock_hass):
+    """Test unexpected exception in async_handle_mcp_payload returns HTTP 500 with -32603 internal error."""
+    import json
+    from unittest.mock import patch
+
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = json.dumps({"jsonrpc": "2.0", "id": 999, "method": "ping"}).encode("utf-8")
+
+    view = McpStreamableView()
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_handle_mcp_payload",
+        side_effect=RuntimeError("Database failure"),
+    ):
+        resp = await view.post(req)
+
+    assert resp.status == 500
+    assert resp.headers.get("Mcp-Protocol-Version") == "2026-07-28"
+    body = json.loads(resp.body.decode("utf-8"))
+    assert body.get("jsonrpc") == "2.0"
+    assert body.get("id") == 999
+    assert body.get("error", {}).get("code") == -32603
+    assert "Internal error: Database failure" in body.get("error", {}).get("message", "")
+
+
+@pytest.mark.asyncio
 async def test_mcp_view_registration_in_setup_entry(mock_hass):
     """Test McpStreamableView is registered during async_setup_entry."""
     from unittest.mock import AsyncMock, MagicMock, patch
+
     from custom_components.google_assistant_entity_console import async_setup_entry
 
     mock_entry = MagicMock()

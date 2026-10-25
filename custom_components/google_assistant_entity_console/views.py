@@ -1260,7 +1260,19 @@ class McpStreamableView(HomeAssistantView):
                 headers={"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION},
             )
 
-        res = await async_handle_mcp_payload(request.app["hass"], payload)
+        try:
+            res = await async_handle_mcp_payload(request.app["hass"], payload)
+        except Exception as err:
+            _LOGGER.exception("Unexpected error in MCP endpoint: %s", err)
+            return web.json_response(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603, "message": f"Internal error: {err}"},
+                    "id": payload.get("id") if isinstance(payload, dict) else None,
+                },
+                status=500,
+                headers={"Mcp-Protocol-Version": "2026-07-28"},
+            )
 
         if res is None:
             return web.Response(

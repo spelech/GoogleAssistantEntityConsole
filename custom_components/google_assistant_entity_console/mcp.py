@@ -8,10 +8,10 @@ voice aliases, blocklists, and Google HomeGraph synchronization.
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime, timezone
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -487,6 +487,8 @@ async def _handle_get_google_assistant_status(
     blocklisted_count = 0
     if compiled_blocklist:
         for entry in ent_values:
+            if getattr(entry, "disabled_by", None) or getattr(entry, "hidden_by", None):
+                continue
             eid = getattr(entry, "entity_id", "")
             if any(rx.search(eid) for rx in compiled_blocklist):
                 blocklisted_count += 1
@@ -522,6 +524,12 @@ async def _handle_set_entity_exposure(hass: HomeAssistant, args: dict[str, Any])
     else:
         return {
             "content": [{"type": "text", "text": "Missing or invalid required argument: entity_ids"}],
+            "isError": True,
+        }
+
+    if not entity_ids:
+        return {
+            "content": [{"type": "text", "text": "Argument 'entity_ids' must contain at least one entity ID"}],
             "isError": True,
         }
 
