@@ -12,6 +12,7 @@
   <a href="#key-features">Key Features</a> •
   <a href="#installation">Installation</a> •
   <a href="#configuration">Configuration</a> •
+  <a href="#mcp-server-model-context-protocol">MCP Server</a> •
   <a href="#ai-assistant-integration">AI Features</a> •
   <a href="#documentation">Documentation</a> •
   <a href="#faq--troubleshooting">FAQ</a>
@@ -42,6 +43,7 @@ Self-hosted Google Assistant in Home Assistant traditionally requires manual YAM
   - **Inline Renaming**: Edit entity display names directly on the row.
   - **Voice Nickname Chips**: View, add, or delete voice aliases (nicknames) with chip management.
 - **Regex Blocklist Manager**: Filter out entities or domain patterns (e.g. `.*_battery_level$`) using regular expression rules with live validation.
+- **Native Model Context Protocol (MCP) Server**: Exposes an MCP 2026-07-28 Streamable HTTP endpoint for AI coding agents and LLM gateways (Antigravity, Claude, MCG) to query and manage entities, nicknames, blocklists, and sync live to Google HomeGraph.
 - **AI Assistant Integration**:
   - Suggest entity exposure based on natural-language requests (e.g., *"Expose all living room lights and climate controls"*).
   - Bulk and room-aware voice nickname generation using local LLMs (Ollama, LocalAI, vLLM), cloud endpoints (OpenAI, OpenRouter, Groq), or Home Assistant Assist conversation agents.
@@ -95,6 +97,94 @@ Once installed and Home Assistant has restarted:
 2. Click **Add Integration** in the bottom-right corner.
 3. Search for **Google Assistant Entity Console** and select it.
 4. Open the **Google Sync** panel in your sidebar and click **Settings** to verify or configure your Google Cloud `project_id` and `SERVICE_ACCOUNT.json` credentials directly in `.storage` (or click **Migrate from YAML** to import and comment out any legacy `google_assistant:` block in `configuration.yaml`).
+
+---
+
+## MCP Server (Model Context Protocol)
+
+Google Assistant Entity Console includes a native **Model Context Protocol (MCP)** server adhering to the MCP specification revision **`2026-07-28` (Streamable HTTP Transport)**.
+
+This allows external AI coding assistants (such as Google Antigravity, Claude Desktop, Cursor) and orchestrators such as Model Context Gateway (MCG) to inspect, manage, and synchronize your Google Assistant entities programmatically without custom wrappers.
+
+### Endpoint & Authentication
+
+- **Endpoint**: `POST /api/google_assistant_entity_console/mcp`
+- **Transport**: Streamable HTTP (`stateless`, JSON-RPC 2.0; supports standard JSON responses and `Accept: text/event-stream` SSE streaming)
+- **Protocol Version**: `2026-07-28` (returned in the `Mcp-Protocol-Version` HTTP header)
+- **Authentication**: Standard Home Assistant Long-Lived Access Token via HTTP header:
+  ```http
+  Authorization: Bearer <HA_LONG_LIVED_ACCESS_TOKEN>
+  ```
+
+### Available Tools (7 Native Tools)
+
+| Tool | Description | Key Parameters |
+| :--- | :--- | :--- |
+| `list_entities` | Queries entities registered in Home Assistant along with their Google Assistant exposure status, area, floor, and aliases. | `domain`, `area`, `floor`, `exposure_status` (`all`, `exposed`, `not_exposed`, `blocked`), `search` |
+| `get_entity` | Retrieves detailed Google Assistant configuration, names, aliases, and registry metadata for a single entity. | `entity_id` (required) |
+| `get_google_assistant_status` | Checks cloud project status, credentials state, auto-sync setting, and exposure/synced counts. | *None* |
+| `set_entity_exposure` | Exposes or unexposes one or more entities to Google Assistant in `.storage` and live memory. | `entity_ids` (required, array), `exposed` (required, boolean) |
+| `set_entity_nicknames` | Modifies voice aliases used by Google Assistant for voice matching. | `entity_id` (required), `nicknames` (required, array), `mode` (`replace`, `append`, `remove`) |
+| `manage_blocklist_rule` | Adds or removes regular expression blocklist filters. | `action` (`add`, `remove`), `pattern` (e.g. `.*_battery_level$`) |
+| `sync_to_google` | Triggers a real-time zero-reboot `devices:requestSync` call to Google HomeGraph. | *None* |
+
+### Client Configuration Examples
+
+#### 1. Model Context Gateway (MCG) / Antigravity (`agy`) / HTTP Clients
+In your MCP configuration file (e.g. `mcg.config.json` or Antigravity MCP settings):
+
+```json
+{
+  "mcpServers": {
+    "google-assistant-entity-console": {
+      "url": "http://<YOUR_HA_HOST>:8123/api/google_assistant_entity_console/mcp",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer <YOUR_HA_LONG_LIVED_ACCESS_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+#### 2. Claude Desktop / Local CLI Bridge (via `mcp-remote`)
+If using an MCP proxy runner such as `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "google-assistant-entity-console": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://<YOUR_HA_HOST>:8123/api/google_assistant_entity_console/mcp",
+        "--header",
+        "Authorization: Bearer <YOUR_HA_LONG_LIVED_ACCESS_TOKEN>"
+      ]
+    }
+  }
+}
+```
+
+#### 3. Direct JSON-RPC 2.0 Request (cURL)
+```bash
+curl -X POST "http://<YOUR_HA_HOST>:8123/api/google_assistant_entity_console/mcp" \
+  -H "Authorization: Bearer <YOUR_HA_LONG_LIVED_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "list_entities",
+      "arguments": {
+        "domain": "light",
+        "exposure_status": "exposed"
+      }
+    },
+    "id": 1
+  }'
+```
 
 ---
 
