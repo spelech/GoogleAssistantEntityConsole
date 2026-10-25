@@ -22,6 +22,7 @@ from .views import (
     BlocklistView,
     EntitiesView,
     GoogleSettingsView,
+    McpStreamableView,
     MigrateYamlView,
     RebuildView,
     RestartView,
@@ -91,6 +92,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(AIGenerateNicknamesView())
     hass.http.register_view(AISuggestExposureView())
     hass.http.register_view(AIGenerateSingleEntityNicknameView())
+    hass.http.register_view(McpStreamableView())
 
     # 4. Register Sidebar Panel
     async_remove_panel(hass, DOMAIN, warn_if_unknown=False)

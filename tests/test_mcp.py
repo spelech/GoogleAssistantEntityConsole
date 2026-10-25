@@ -9,6 +9,7 @@ from custom_components.google_assistant_entity_console.mcp import (
     TOOL_DEFINITIONS,
     async_handle_mcp_payload,
 )
+from custom_components.google_assistant_entity_console.views import McpStreamableView
 
 
 @pytest.mark.asyncio
@@ -893,6 +894,186 @@ async def test_mcp_call_top_level_exception_handling(mock_hass):
         assert res["id"] == 99
         assert res["result"].get("isError") is True
         assert "Simulated catastrophic crash" in res["result"]["content"][0]["text"]
+
+
+# ===========================================================================
+# Task 4: Home Assistant HTTP View Integration (McpStreamableView) Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_mcp_view_attributes():
+    """Test McpStreamableView URL, name, and auth requirement attributes."""
+    view = McpStreamableView()
+    assert view.url == "/api/google_assistant_entity_console/mcp"
+    assert view.name == "api:google_assistant_entity_console:mcp"
+    assert view.requires_auth is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_post_json(mock_hass):
+    """Test valid JSON-RPC POST returns 200 with Mcp-Protocol-Version header and JSON body."""
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode("utf-8")
+
+    view = McpStreamableView()
+    resp = await view.post(req)
+
+    assert resp.status == 200
+    assert resp.headers.get("Mcp-Protocol-Version") == "2026-07-28"
+    assert resp.content_type == "application/json"
+    body = json.loads(resp.body.decode("utf-8"))
+    assert body == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_post_invalid_json(mock_hass):
+    """Test invalid JSON POST returns HTTP 400 with -32700 parse error."""
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = b"invalid json content {"
+
+    view = McpStreamableView()
+    resp = await view.post(req)
+
+    assert resp.status == 400
+    assert resp.headers.get("Mcp-Protocol-Version") == "2026-07-28"
+    body = json.loads(resp.body.decode("utf-8"))
+    assert body.get("jsonrpc") == "2.0"
+    assert body.get("error", {}).get("code") == -32700
+    assert "Parse error" in body.get("error", {}).get("message", "")
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_post_sse_stream(mock_hass):
+    """Test Accept: text/event-stream returns 200 with SSE formatted event."""
+    import json
+    from unittest.mock import patch
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Accept": "text/event-stream", "Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "initialize",
+            "params": {"protocolVersion": "2026-07-28"},
+        }
+    ).encode("utf-8")
+
+    written_chunks = []
+    orig_write = web.StreamResponse.write
+
+    async def mock_write(self, data):
+        written_chunks.append(data)
+        return await orig_write(self, data)
+
+    view = McpStreamableView()
+    with patch.object(web.StreamResponse, "write", mock_write):
+        resp = await view.post(req)
+
+    assert resp.status == 200
+    assert resp.headers.get("Content-Type") == "text/event-stream"
+    assert resp.headers.get("Mcp-Protocol-Version") == "2026-07-28"
+    assert resp.headers.get("Cache-Control") == "no-cache"
+    assert resp.headers.get("Connection") == "keep-alive"
+
+    assert len(written_chunks) == 1
+    chunk_str = written_chunks[0].decode("utf-8")
+    assert chunk_str.startswith("event: message\ndata: ")
+    assert chunk_str.endswith("\n\n")
+
+    event_payload = json.loads(chunk_str[len("event: message\ndata: ") : -2])
+    assert event_payload["jsonrpc"] == "2.0"
+    assert event_payload["id"] == 2
+    assert event_payload["result"]["protocolVersion"] == "2026-07-28"
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_post_notification_204(mock_hass):
+    """Test JSON-RPC notification returns HTTP 204 No Content."""
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Content-Type": "application/json"},
+        app=app,
+    )
+    req._read_bytes = json.dumps(
+        {"jsonrpc": "2.0", "method": "notifications/initialized"}
+    ).encode("utf-8")
+
+    view = McpStreamableView()
+    resp = await view.post(req)
+
+    assert resp.status == 204
+    assert resp.headers.get("Mcp-Protocol-Version") == "2026-07-28"
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_registration_in_setup_entry(mock_hass):
+    """Test McpStreamableView is registered during async_setup_entry."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from custom_components.google_assistant_entity_console import async_setup_entry
+
+    mock_entry = MagicMock()
+    mock_hass.http.register_view = MagicMock()
+    mock_hass.http.async_register_static_paths = AsyncMock()
+
+    with patch(
+        "custom_components.google_assistant_entity_console.async_remove_panel"
+    ), patch(
+        "custom_components.google_assistant_entity_console.async_register_built_in_panel"
+    ), patch(
+        "custom_components.google_assistant_entity_console.async_get_store",
+        new_callable=AsyncMock,
+    ), patch(
+        "custom_components.google_assistant_entity_console.async_get_runtime",
+        new_callable=AsyncMock,
+    ), patch(
+        "custom_components.google_assistant_entity_console.async_build_entity_config_map",
+        new_callable=AsyncMock,
+    ):
+        result = await async_setup_entry(mock_hass, mock_entry)
+        assert result is True
+
+    registered_views = [
+        call.args[0] for call in mock_hass.http.register_view.call_args_list
+    ]
+    assert any(isinstance(v, McpStreamableView) for v in registered_views)
 
 
 

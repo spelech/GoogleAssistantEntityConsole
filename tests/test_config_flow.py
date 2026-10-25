@@ -25,6 +25,7 @@ from custom_components.google_assistant_entity_console.views import (
     BlocklistView,
     EntitiesView,
     GoogleSettingsView,
+    McpStreamableView,
     MigrateYamlView,
     RebuildView,
     RestartView,
@@ -157,8 +158,8 @@ async def test_async_setup_entry_success(lifecycle_hass):
         )
         assert static_path_config.cache_headers is True
 
-        # 2. Verify registration of all 15 API views in exact order
-        assert lifecycle_hass.http.register_view.call_count == 15
+        # 2. Verify registration of all 16 API views in exact order
+        assert lifecycle_hass.http.register_view.call_count == 16
         registered_classes = [
             call.args[0].__class__
             for call in lifecycle_hass.http.register_view.call_args_list
@@ -179,6 +180,7 @@ async def test_async_setup_entry_success(lifecycle_hass):
             AIGenerateNicknamesView,
             AISuggestExposureView,
             AIGenerateSingleEntityNicknameView,
+            McpStreamableView,
         ]
         assert registered_classes == expected_classes
 
