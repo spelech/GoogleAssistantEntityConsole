@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SERVER_NAME = "google-assistant-entity-console"
-SERVER_VERSION = "3.0.2"
+SERVER_VERSION = "3.1.0"
 TOOL_CACHE_TTL_MS = 300000
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
