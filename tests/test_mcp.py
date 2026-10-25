@@ -558,4 +558,342 @@ async def test_mcp_call_get_entity_missing_id(mock_hass):
     assert "Missing required argument" in res["result"]["content"][0]["text"]
 
 
+# ===========================================================================
+# Task 3: Mutation & Action Tool Tests
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_mcp_call_set_entity_exposure(mock_hass):
+    """Test set_entity_exposure successfully updates entity exposure."""
+    import json
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_exposure",
+            "arguments": {"entity_ids": ["light.living_room_lights"], "exposed": True},
+        },
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert not res["result"].get("isError", False)
+    content = json.loads(res["result"]["content"][0]["text"])
+    assert content["status"] == "success"
+    assert content["updated"] == ["light.living_room_lights"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_set_entity_exposure_string_coercion(mock_hass):
+    """Test set_entity_exposure coerces single string entity_ids to list."""
+    import json
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 201,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_exposure",
+            "arguments": {"entity_ids": "light.single_light", "exposed": False},
+        },
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert not res["result"].get("isError", False)
+    content = json.loads(res["result"]["content"][0]["text"])
+    assert content["status"] == "success"
+    assert content["updated"] == ["light.single_light"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_set_entity_exposure_invalid_args(mock_hass):
+    """Test set_entity_exposure errors on missing or invalid arguments."""
+    # Missing entity_ids
+    req1 = {
+        "jsonrpc": "2.0",
+        "id": 202,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_exposure",
+            "arguments": {"exposed": True},
+        },
+    }
+    res1 = await async_handle_mcp_payload(mock_hass, req1)
+    assert res1["result"].get("isError") is True
+
+    # Missing exposed boolean
+    req2 = {
+        "jsonrpc": "2.0",
+        "id": 203,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_exposure",
+            "arguments": {"entity_ids": ["light.test"]},
+        },
+    }
+    res2 = await async_handle_mcp_payload(mock_hass, req2)
+    assert res2["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_set_entity_nicknames(mock_hass):
+    """Test set_entity_nicknames with replace, append, and remove modes."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    mock_entry = MagicMock()
+    mock_entry.entity_id = "light.living_room_lights"
+    mock_entry.aliases = ["Old Name"]
+    mock_ent_reg = MagicMock()
+    mock_ent_reg.async_get.return_value = mock_entry
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.entity_registry.async_get",
+        return_value=mock_ent_reg,
+    ):
+        # 1. Replace mode
+        req = {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "set_entity_nicknames",
+                "arguments": {
+                    "entity_id": "light.living_room_lights",
+                    "nicknames": ["Chandelier", "Main Lights"],
+                    "mode": "replace",
+                },
+            },
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        assert res["jsonrpc"] == "2.0"
+        assert not res["result"].get("isError", False)
+        content = json.loads(res["result"]["content"][0]["text"])
+        assert content["nicknames"] == ["Chandelier", "Main Lights"]
+
+        # 2. Append mode
+        mock_entry.aliases = ["Chandelier", "Main Lights"]
+        req_append = {
+            "jsonrpc": "2.0",
+            "id": 211,
+            "method": "tools/call",
+            "params": {
+                "name": "set_entity_nicknames",
+                "arguments": {
+                    "entity_id": "light.living_room_lights",
+                    "nicknames": ["Ceiling Fan Light", "Chandelier"],  # deduplicate
+                    "mode": "append",
+                },
+            },
+        }
+        res_append = await async_handle_mcp_payload(mock_hass, req_append)
+        assert not res_append["result"].get("isError", False)
+        content_append = json.loads(res_append["result"]["content"][0]["text"])
+        assert content_append["nicknames"] == ["Chandelier", "Main Lights", "Ceiling Fan Light"]
+
+        # 3. Remove mode
+        mock_entry.aliases = ["Chandelier", "Main Lights", "Ceiling Fan Light"]
+        req_remove = {
+            "jsonrpc": "2.0",
+            "id": 212,
+            "method": "tools/call",
+            "params": {
+                "name": "set_entity_nicknames",
+                "arguments": {
+                    "entity_id": "light.living_room_lights",
+                    "nicknames": ["Chandelier"],
+                    "mode": "remove",
+                },
+            },
+        }
+        res_remove = await async_handle_mcp_payload(mock_hass, req_remove)
+        assert not res_remove["result"].get("isError", False)
+        content_remove = json.loads(res_remove["result"]["content"][0]["text"])
+        assert content_remove["nicknames"] == ["Main Lights", "Ceiling Fan Light"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_set_entity_nicknames_errors(mock_hass):
+    """Test set_entity_nicknames validation errors."""
+    # Missing entity_id
+    req1 = {
+        "jsonrpc": "2.0",
+        "id": 213,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_nicknames",
+            "arguments": {"nicknames": ["Test"]},
+        },
+    }
+    res1 = await async_handle_mcp_payload(mock_hass, req1)
+    assert res1["result"].get("isError") is True
+
+    # Missing nicknames
+    req2 = {
+        "jsonrpc": "2.0",
+        "id": 214,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_nicknames",
+            "arguments": {"entity_id": "light.test"},
+        },
+    }
+    res2 = await async_handle_mcp_payload(mock_hass, req2)
+    assert res2["result"].get("isError") is True
+
+    # Invalid mode
+    req3 = {
+        "jsonrpc": "2.0",
+        "id": 215,
+        "method": "tools/call",
+        "params": {
+            "name": "set_entity_nicknames",
+            "arguments": {
+                "entity_id": "light.test",
+                "nicknames": ["Test"],
+                "mode": "invalid_mode",
+            },
+        },
+    }
+    res3 = await async_handle_mcp_payload(mock_hass, req3)
+    assert res3["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_manage_blocklist_rule(mock_hass):
+    """Test manage_blocklist_rule adds and removes patterns."""
+    import json
+    from unittest.mock import patch
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_load_blocklist",
+        return_value=[],
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_save_blocklist",
+    ) as mock_save:
+        # Add rule
+        req_add = {
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {
+                "name": "manage_blocklist_rule",
+                "arguments": {"action": "add", "pattern": ".*_battery_level$"},
+            },
+        }
+        res_add = await async_handle_mcp_payload(mock_hass, req_add)
+        assert res_add["jsonrpc"] == "2.0"
+        assert not res_add["result"].get("isError", False)
+        content_add = json.loads(res_add["result"]["content"][0]["text"])
+        assert content_add["status"] == "success"
+        assert content_add["action"] == "add"
+        assert ".*_battery_level$" in content_add["blocklist"]
+        assert "affected_entities_count" in content_add
+        mock_save.assert_called_once()
+
+    # Remove rule
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_load_blocklist",
+        return_value=[".*_battery_level$"],
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_save_blocklist",
+    ) as mock_save_remove:
+        req_rem = {
+            "jsonrpc": "2.0",
+            "id": 221,
+            "method": "tools/call",
+            "params": {
+                "name": "manage_blocklist_rule",
+                "arguments": {"action": "remove", "pattern": ".*_battery_level$"},
+            },
+        }
+        res_rem = await async_handle_mcp_payload(mock_hass, req_rem)
+        assert not res_rem["result"].get("isError", False)
+        content_rem = json.loads(res_rem["result"]["content"][0]["text"])
+        assert content_rem["action"] == "remove"
+        assert ".*_battery_level$" not in content_rem["blocklist"]
+        mock_save_remove.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_manage_blocklist_rule_invalid_regex(mock_hass):
+    """Test manage_blocklist_rule rejects invalid regex pattern."""
+    req = {
+        "jsonrpc": "2.0",
+        "id": 222,
+        "method": "tools/call",
+        "params": {
+            "name": "manage_blocklist_rule",
+            "arguments": {"action": "add", "pattern": "[invalid(regex"},
+        },
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert res["result"].get("isError") is True
+    assert "Invalid regular expression pattern" in res["result"]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_manage_blocklist_rule_invalid_action(mock_hass):
+    """Test manage_blocklist_rule rejects invalid action."""
+    req = {
+        "jsonrpc": "2.0",
+        "id": 223,
+        "method": "tools/call",
+        "params": {
+            "name": "manage_blocklist_rule",
+            "arguments": {"action": "destroy", "pattern": ".*_battery$"},
+        },
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["result"].get("isError") is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_sync_to_google(mock_hass):
+    """Test sync_to_google triggers runtime sync."""
+    import json
+
+    req = {
+        "jsonrpc": "2.0",
+        "id": 23,
+        "method": "tools/call",
+        "params": {"name": "sync_to_google", "arguments": {}},
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert not res["result"].get("isError", False)
+    content = json.loads(res["result"]["content"][0]["text"])
+    assert content["status"] in ("success", "error")
+    assert "status_code" in content
+    assert "timestamp" in content
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_top_level_exception_handling(mock_hass):
+    """Test top-level try...except catches unhandled exceptions and returns isError."""
+    from unittest.mock import patch
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp._handle_set_entity_exposure",
+        side_effect=RuntimeError("Simulated catastrophic crash"),
+    ):
+        req = {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {
+                "name": "set_entity_exposure",
+                "arguments": {"entity_ids": ["light.test"], "exposed": True},
+            },
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        assert res["jsonrpc"] == "2.0"
+        assert res["id"] == 99
+        assert res["result"].get("isError") is True
+        assert "Simulated catastrophic crash" in res["result"]["content"][0]["text"]
+
+
+
 

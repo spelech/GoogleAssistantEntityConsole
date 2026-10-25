@@ -8,6 +8,7 @@ voice aliases, blocklists, and Google HomeGraph synchronization.
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timezone
 import json
 import logging
 import re
@@ -22,8 +23,14 @@ from homeassistant.helpers import (
 )
 
 from .const import DOMAIN
+from .runtime import async_get_runtime
 from .store import async_get_store
-from .views import async_fetch_entities_data, async_load_blocklist
+from .views import (
+    async_build_entity_config_map,
+    async_fetch_entities_data,
+    async_load_blocklist,
+    async_save_blocklist,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -505,6 +512,291 @@ async def _handle_get_google_assistant_status(
     }
 
 
+async def _handle_set_entity_exposure(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
+    """Execute set_entity_exposure tool."""
+    raw_entity_ids = args.get("entity_ids")
+    if isinstance(raw_entity_ids, str):
+        entity_ids = [raw_entity_ids]
+    elif isinstance(raw_entity_ids, list) and all(isinstance(x, str) for x in raw_entity_ids):
+        entity_ids = list(raw_entity_ids)
+    else:
+        return {
+            "content": [{"type": "text", "text": "Missing or invalid required argument: entity_ids"}],
+            "isError": True,
+        }
+
+    if "exposed" not in args or not isinstance(args.get("exposed"), bool):
+        return {
+            "content": [{"type": "text", "text": "Missing or invalid required argument: exposed (boolean)"}],
+            "isError": True,
+        }
+    exposed = bool(args["exposed"])
+
+    store = await async_get_store(hass)
+    ent_reg = entity_registry.async_get(hass)
+
+    for entity_id in entity_ids:
+        entry = ent_reg.async_get(entity_id) if hasattr(ent_reg, "async_get") else None
+        if not entry:
+            _LOGGER.warning("Entity '%s' not found in entity registry during set_entity_exposure", entity_id)
+
+        # Update store if dedicated method exists or update synced_entities directly
+        if hasattr(store, "async_update_entity"):
+            await store.async_update_entity(entity_id, should_expose=exposed)
+        else:
+            if exposed:
+                aliases = list(getattr(entry, "aliases", []) or []) if entry else []
+                name = getattr(entry, "name", None) or getattr(entry, "original_name", None) if entry else None
+                store.synced_entities[entity_id] = {
+                    "name": name,
+                    "aliases": aliases,
+                    "room": None,
+                }
+            else:
+                store.synced_entities.pop(entity_id, None)
+            await store.async_save()
+
+        # Update entity registry options if available
+        if hasattr(ent_reg, "async_update_entity_options"):
+            ent_reg.async_update_entity_options(
+                entity_id,
+                "conversation",
+                {"should_expose": exposed},
+            )
+
+    runtime = await async_get_runtime(hass)
+    for entity_id in entity_ids:
+        aliases = None
+        entry = ent_reg.async_get(entity_id) if hasattr(ent_reg, "async_get") else None
+        if entry and getattr(entry, "aliases", None):
+            aliases = list(entry.aliases)
+        if hasattr(runtime, "async_update_entity_config"):
+            await runtime.async_update_entity_config(entity_id, should_expose=exposed, aliases=aliases)
+
+    if hasattr(runtime, "async_refresh_memory_config"):
+        entity_config = await async_build_entity_config_map(hass)
+        await runtime.async_refresh_memory_config(entity_config, schedule_auto_sync=True)
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps({"status": "success", "updated": entity_ids}, indent=2),
+            }
+        ],
+    }
+
+
+async def _handle_set_entity_nicknames(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
+    """Execute set_entity_nicknames tool."""
+    entity_id = args.get("entity_id")
+    if not entity_id or not isinstance(entity_id, str):
+        return {
+            "content": [{"type": "text", "text": "Missing or invalid required argument: entity_id"}],
+            "isError": True,
+        }
+
+    nicknames = args.get("nicknames")
+    if nicknames is None or not isinstance(nicknames, list) or not all(isinstance(x, str) for x in nicknames):
+        return {
+            "content": [{"type": "text", "text": "Missing or invalid required argument: nicknames (must be list of strings)"}],
+            "isError": True,
+        }
+
+    mode = args.get("mode", "replace")
+    if mode not in ("replace", "append", "remove"):
+        return {
+            "content": [{"type": "text", "text": f"Invalid mode: '{mode}'. Expected 'replace', 'append', or 'remove'"}],
+            "isError": True,
+        }
+
+    ent_reg = entity_registry.async_get(hass)
+    entry = ent_reg.async_get(entity_id) if hasattr(ent_reg, "async_get") else None
+    existing: list[str] = []
+    if entry and getattr(entry, "aliases", None):
+        existing = [str(a) for a in entry.aliases if a and str(a) != "0"]
+    else:
+        store = await async_get_store(hass)
+        if entity_id in store.synced_entities:
+            existing = [str(a) for a in store.synced_entities[entity_id].get("aliases", []) if a and str(a) != "0"]
+
+    clean_input = [n.strip() for n in nicknames if n and n.strip() and n.strip() != "0"]
+
+    if mode == "replace":
+        final_nicknames = list(dict.fromkeys(clean_input))
+    elif mode == "append":
+        combined = list(existing)
+        for n in clean_input:
+            if n not in combined:
+                combined.append(n)
+        final_nicknames = combined
+    elif mode == "remove":
+        to_remove = set(clean_input)
+        final_nicknames = [n for n in existing if n not in to_remove]
+    else:
+        final_nicknames = list(dict.fromkeys(clean_input))
+
+    store = await async_get_store(hass)
+    if hasattr(store, "async_update_entity"):
+        await store.async_update_entity(entity_id, aliases=final_nicknames)
+    else:
+        if entity_id in store.synced_entities:
+            store.synced_entities[entity_id]["aliases"] = final_nicknames
+            await store.async_save()
+
+    if entry and hasattr(ent_reg, "async_update_entity"):
+        ent_reg.async_update_entity(entity_id, aliases=set(final_nicknames))
+
+    runtime = await async_get_runtime(hass)
+    if hasattr(runtime, "async_update_entity_config"):
+        await runtime.async_update_entity_config(entity_id, aliases=final_nicknames)
+
+    if hasattr(runtime, "async_refresh_memory_config"):
+        entity_config = await async_build_entity_config_map(hass)
+        await runtime.async_refresh_memory_config(entity_config, schedule_auto_sync=True)
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(
+                    {
+                        "status": "success",
+                        "entity_id": entity_id,
+                        "nicknames": final_nicknames,
+                    },
+                    indent=2,
+                ),
+            }
+        ],
+    }
+
+
+async def _handle_manage_blocklist_rule(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
+    """Execute manage_blocklist_rule tool."""
+    action = args.get("action")
+    if action not in ("add", "remove"):
+        return {
+            "content": [{"type": "text", "text": "Missing or invalid required argument: action ('add' or 'remove')"}],
+            "isError": True,
+        }
+
+    pattern = args.get("pattern")
+    if not pattern or not isinstance(pattern, str):
+        return {
+            "content": [{"type": "text", "text": "Missing or invalid required argument: pattern (regex string)"}],
+            "isError": True,
+        }
+
+    try:
+        re.compile(pattern)
+    except (re.error, TypeError) as err:
+        return {
+            "content": [{"type": "text", "text": f"Invalid regular expression pattern '{pattern}': {err}"}],
+            "isError": True,
+        }
+
+    store = await async_get_store(hass)
+    if action == "add":
+        if hasattr(store, "async_add_blocklist_pattern"):
+            await store.async_add_blocklist_pattern(pattern)
+        else:
+            blocklist = await async_load_blocklist(hass)
+            if pattern not in blocklist:
+                blocklist.append(pattern)
+                await async_save_blocklist(hass, blocklist)
+    elif action == "remove":
+        if hasattr(store, "async_remove_blocklist_pattern"):
+            await store.async_remove_blocklist_pattern(pattern)
+        else:
+            blocklist = await async_load_blocklist(hass)
+            if pattern in blocklist:
+                blocklist.remove(pattern)
+                await async_save_blocklist(hass, blocklist)
+
+    current_blocklist = await async_load_blocklist(hass)
+    if not current_blocklist and hasattr(store, "blocklist"):
+        current_blocklist = list(store.blocklist)
+
+    compiled_rules: list[re.Pattern] = []
+    for p in current_blocklist:
+        with contextlib.suppress(re.error):
+            compiled_rules.append(re.compile(p))
+
+    ent_reg = entity_registry.async_get(hass)
+    raw_entities = getattr(ent_reg, "entities", {})
+    affected_count = 0
+    if isinstance(raw_entities, dict) and compiled_rules:
+        for entry in raw_entities.values():
+            if getattr(entry, "disabled_by", None) or getattr(entry, "hidden_by", None):
+                continue
+            eid = getattr(entry, "entity_id", "")
+            if any(rx.search(eid) for rx in compiled_rules):
+                affected_count += 1
+
+    runtime = await async_get_runtime(hass)
+    if hasattr(runtime, "async_refresh_memory_config"):
+        entity_config = await async_build_entity_config_map(hass)
+        await runtime.async_refresh_memory_config(entity_config, schedule_auto_sync=True)
+
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(
+                    {
+                        "status": "success",
+                        "action": action,
+                        "pattern": pattern,
+                        "blocklist": current_blocklist,
+                        "affected_entities_count": affected_count,
+                    },
+                    indent=2,
+                ),
+            }
+        ],
+    }
+
+
+async def _handle_sync_to_google(hass: HomeAssistant, args: dict[str, Any]) -> dict[str, Any]:
+    """Execute sync_to_google tool."""
+    runtime = await async_get_runtime(hass)
+    if hasattr(runtime, "async_request_sync"):
+        result = await runtime.async_request_sync()
+    else:
+        entity_config = await async_build_entity_config_map(hass)
+        result = await runtime.async_sync_to_google(entity_config)
+
+    success = result.get("success", False) if isinstance(result, dict) else bool(result)
+    status_code = (
+        result.get("status_code", 200 if success else 500)
+        if isinstance(result, dict)
+        else (200 if success else 500)
+    )
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    resp_payload = {
+        "status": "success" if success else "error",
+        "status_code": status_code,
+        "timestamp": timestamp,
+    }
+    if isinstance(result, dict):
+        for k, v in result.items():
+            if k not in ("success", "status_code"):
+                resp_payload[k] = v
+
+    response: dict[str, Any] = {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(resp_payload, indent=2),
+            }
+        ],
+    }
+    if not success:
+        response["isError"] = True
+    return response
+
 
 async def async_handle_mcp_payload(hass: HomeAssistant, payload: Any) -> dict[str, Any] | None:
     """Route and handle an incoming MCP JSON-RPC payload.
@@ -573,28 +865,50 @@ async def async_handle_mcp_payload(hass: HomeAssistant, payload: Any) -> dict[st
         if not isinstance(arguments, dict):
             return _jsonrpc_error(-32602, "Invalid arguments: expected object", req_id)
 
-        if name == "list_entities":
-            res = await _handle_list_entities(hass, arguments)
-            return _jsonrpc_result(res, req_id)
-        if name == "get_entity":
-            res = await _handle_get_entity(hass, arguments)
-            return _jsonrpc_result(res, req_id)
-        if name == "get_google_assistant_status":
-            res = await _handle_get_google_assistant_status(hass, arguments)
-            return _jsonrpc_result(res, req_id)
+        try:
+            if name == "list_entities":
+                res = await _handle_list_entities(hass, arguments)
+                return _jsonrpc_result(res, req_id)
+            if name == "get_entity":
+                res = await _handle_get_entity(hass, arguments)
+                return _jsonrpc_result(res, req_id)
+            if name == "get_google_assistant_status":
+                res = await _handle_get_google_assistant_status(hass, arguments)
+                return _jsonrpc_result(res, req_id)
+            if name == "set_entity_exposure":
+                res = await _handle_set_entity_exposure(hass, arguments)
+                return _jsonrpc_result(res, req_id)
+            if name == "set_entity_nicknames":
+                res = await _handle_set_entity_nicknames(hass, arguments)
+                return _jsonrpc_result(res, req_id)
+            if name == "manage_blocklist_rule":
+                res = await _handle_manage_blocklist_rule(hass, arguments)
+                return _jsonrpc_result(res, req_id)
+            if name == "sync_to_google":
+                res = await _handle_sync_to_google(hass, arguments)
+                return _jsonrpc_result(res, req_id)
 
-        return _jsonrpc_result(
-            {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Tool '{name}' is not implemented or unknown",
-                    }
-                ],
-                "isError": True,
-            },
-            req_id,
-        )
+            return _jsonrpc_result(
+                {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Tool '{name}' is not implemented or unknown",
+                        }
+                    ],
+                    "isError": True,
+                },
+                req_id,
+            )
+        except Exception as err:
+            _LOGGER.exception("Tool execution error in '%s': %s", name, err)
+            return _jsonrpc_result(
+                {
+                    "content": [{"type": "text", "text": str(err)}],
+                    "isError": True,
+                },
+                req_id,
+            )
 
     # Notifications without id do not receive error responses
     if is_notification:
