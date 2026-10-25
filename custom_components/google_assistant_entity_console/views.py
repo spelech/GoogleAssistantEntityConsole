@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -1234,3 +1235,99 @@ class AIGenerateSingleEntityNicknameView(HomeAssistantView):
         except Exception as err:
             _LOGGER.exception("Failed to generate single nickname")
             return self.json({"error": str(err)}, status_code=500)
+
+
+class McpStreamableView(HomeAssistantView):
+    """MCP Streamable HTTP view endpoint adhering to MCP 2026-07-28."""
+
+    url = "/api/google_assistant_entity_console/mcp"
+    name = "api:google_assistant_entity_console:mcp"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Health check and server discovery for gateways (like MCG) and monitoring."""
+        from .mcp import MCP_PROTOCOL_VERSION
+
+        return web.json_response(
+            {
+                "status": "healthy",
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "server": "google-assistant-entity-console",
+            },
+            headers={
+                "Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+                "Cache-Control": "no-cache, no-transform",
+            },
+        )
+
+    async def post(self, request: web.Request) -> web.StreamResponse:
+        """Handle incoming MCP JSON-RPC 2.0 requests over Streamable HTTP transport."""
+        import contextlib
+
+        from .mcp import MCP_PROTOCOL_VERSION, async_handle_mcp_payload
+
+        try:
+            payload = await request.json()
+        except Exception:
+            return web.json_response(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32700, "message": "Parse error"},
+                    "id": None,
+                },
+                status=400,
+                headers={"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION},
+            )
+
+        try:
+            res = await async_handle_mcp_payload(request.app["hass"], payload)
+        except Exception as err:
+            _LOGGER.exception("Unexpected error in MCP endpoint: %s", err)
+            return web.json_response(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32603, "message": f"Internal error: {err}"},
+                    "id": payload.get("id") if isinstance(payload, dict) else None,
+                },
+                status=500,
+                headers={"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION},
+            )
+
+        if res is None:
+            return web.Response(
+                status=204,
+                headers={"Mcp-Protocol-Version": MCP_PROTOCOL_VERSION},
+            )
+
+        # Health/keepalive pings return immediate JSON without allocating SSE stream buffers
+        is_ping = isinstance(payload, dict) and payload.get("method") == "ping"
+
+        accept_header = request.headers.get("Accept", "")
+        if "text/event-stream" in accept_header and not is_ping:
+            response = web.StreamResponse(
+                status=200,
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+                },
+            )
+            try:
+                await response.prepare(request)
+                sse_payload = f"event: message\ndata: {json.dumps(res)}\n\n".encode("utf-8")
+                await response.write(sse_payload)
+            except (ConnectionResetError, asyncio.CancelledError, Exception) as write_err:
+                _LOGGER.debug("Client closed stream during SSE write: %s", write_err)
+            finally:
+                with contextlib.suppress(Exception):
+                    await response.write_eof()
+            return response
+
+        return web.json_response(
+            res,
+            headers={
+                "Mcp-Protocol-Version": MCP_PROTOCOL_VERSION,
+                "Cache-Control": "no-cache",
+            },
+        )
