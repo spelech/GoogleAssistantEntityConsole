@@ -1188,5 +1188,91 @@ async def test_mcp_view_registration_in_setup_entry(mock_hass):
     assert any(isinstance(v, McpStreamableView) for v in registered_views)
 
 
+@pytest.mark.asyncio
+async def test_mcp_view_get_health_check(mock_hass):
+    """Test GET /api/google_assistant_entity_console/mcp returns healthy status for gateway polling."""
+    import json
+
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "GET",
+        "/api/google_assistant_entity_console/mcp",
+        app=app,
+    )
+    view = McpStreamableView()
+    resp = await view.get(req)
+
+    assert resp.status == 200
+    assert resp.headers.get("Mcp-Protocol-Version") == "2026-07-28"
+    assert "no-cache" in resp.headers.get("Cache-Control", "")
+    body = json.loads(resp.body.decode("utf-8"))
+    assert body.get("status") == "healthy"
+    assert body.get("protocolVersion") == "2026-07-28"
+    assert body.get("server") == "google-assistant-entity-console"
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_post_ping_fastpath_no_stream(mock_hass):
+    """Test ping requests with Accept: text/event-stream return immediate JSON without allocating SSE stream."""
+    import json
+
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
+        app=app,
+    )
+    req._read_bytes = json.dumps({"jsonrpc": "2.0", "id": 42, "method": "ping"}).encode("utf-8")
+
+    view = McpStreamableView()
+    resp = await view.post(req)
+
+    # Must be standard Response (json_response), not a chunked StreamResponse
+    assert not isinstance(resp, web.StreamResponse) or isinstance(resp, web.Response)
+    assert resp.status == 200
+    assert resp.content_type == "application/json"
+    body = json.loads(resp.body.decode("utf-8"))
+    assert body.get("result") == {}
+    assert body.get("id") == 42
+
+
+@pytest.mark.asyncio
+async def test_mcp_view_post_sse_stream_client_disconnect(mock_hass):
+    """Test SSE streaming handles client disconnection during write cleanly and calls write_eof."""
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    app = web.Application()
+    app["hass"] = mock_hass
+    req = make_mocked_request(
+        "POST",
+        "/api/google_assistant_entity_console/mcp",
+        headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
+        app=app,
+    )
+    req._read_bytes = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode("utf-8")
+
+    view = McpStreamableView()
+    with patch("aiohttp.web.StreamResponse.prepare", new_callable=AsyncMock), patch(
+        "aiohttp.web.StreamResponse.write", side_effect=ConnectionResetError("Connection reset by peer")
+    ), patch("aiohttp.web.StreamResponse.write_eof", new_callable=AsyncMock) as mock_write_eof:
+        resp = await view.post(req)
+        assert resp is not None
+        mock_write_eof.assert_awaited_once()
+
+
+
 
 
