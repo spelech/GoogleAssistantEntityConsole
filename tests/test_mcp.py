@@ -117,3 +117,445 @@ async def test_mcp_method_not_found(mock_hass):
     res = await async_handle_mcp_payload(mock_hass, req)
     assert "error" in res
     assert res["error"]["code"] == -32601
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_list_entities(mock_hass):
+    req = {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "list_entities",
+            "arguments": {"domain": "light", "exposure_status": "all"},
+        },
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert res["id"] == 10
+    assert not res["result"].get("isError", False)
+    content = res["result"]["content"]
+    assert len(content) > 0
+    assert content[0]["type"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_entity(mock_hass):
+    req = {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+            "name": "get_entity",
+            "arguments": {"entity_id": "light.living_room_lights"},
+        },
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert res["id"] == 11
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_google_assistant_status(mock_hass):
+    req = {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "tools/call",
+        "params": {"name": "get_google_assistant_status", "arguments": {}},
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert not res["result"].get("isError", False)
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_list_entities_filtering(mock_hass):
+    """Test filtering by domain, area, floor, exposure status, and search."""
+    import json
+    from unittest.mock import patch
+
+    sample_entities = [
+        {
+            "entity_id": "light.living_room_ceiling",
+            "name": "Ceiling Light",
+            "original_name": "Hue Lamp",
+            "display_name": "Living Room Ceiling Light",
+            "device_class": "",
+            "platform": "hue",
+            "should_expose": True,
+            "yaml_exposed": True,
+            "area": "Living Room",
+            "floor": "First Floor",
+            "domain": "light",
+            "aliases": ["overhead light", "main light"],
+            "in_group": False,
+            "unavailable": False,
+        },
+        {
+            "entity_id": "switch.kitchen_fan",
+            "name": "Exhaust Fan",
+            "original_name": "Fan",
+            "display_name": "Kitchen Fan",
+            "device_class": "fan",
+            "platform": "esphome",
+            "should_expose": False,
+            "yaml_exposed": False,
+            "area": "Kitchen",
+            "floor": "First Floor",
+            "domain": "switch",
+            "aliases": ["cooker fan"],
+            "in_group": False,
+            "unavailable": False,
+        },
+        {
+            "entity_id": "climate.upstairs_thermostat",
+            "name": "Upstairs Thermostat",
+            "original_name": "Ecobee",
+            "display_name": "Upstairs Thermostat",
+            "device_class": "",
+            "platform": "ecobee",
+            "should_expose": True,
+            "yaml_exposed": False,
+            "area": "Master Bedroom",
+            "floor": "Second Floor",
+            "domain": "climate",
+            "aliases": ["bedroom ac"],
+            "in_group": False,
+            "unavailable": False,
+        },
+    ]
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_fetch_entities_data",
+        return_value=sample_entities,
+    ):
+        # 1. Filter domain = 'switch'
+        req1 = {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"domain": "switch"}},
+        }
+        res1 = await async_handle_mcp_payload(mock_hass, req1)
+        data1 = json.loads(res1["result"]["content"][0]["text"])
+        assert len(data1) == 1
+        assert data1[0]["entity_id"] == "switch.kitchen_fan"
+
+        # 2. Filter area = 'Living Room'
+        req2 = {
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"area": "Living Room"}},
+        }
+        res2 = await async_handle_mcp_payload(mock_hass, req2)
+        data2 = json.loads(res2["result"]["content"][0]["text"])
+        assert len(data2) == 1
+        assert data2[0]["entity_id"] == "light.living_room_ceiling"
+
+        # 3. Filter floor = 'Second Floor'
+        req3 = {
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"floor": "Second Floor"}},
+        }
+        res3 = await async_handle_mcp_payload(mock_hass, req3)
+        data3 = json.loads(res3["result"]["content"][0]["text"])
+        assert len(data3) == 1
+        assert data3[0]["entity_id"] == "climate.upstairs_thermostat"
+
+        # 4. Filter exposure_status = 'exposed'
+        req4 = {
+            "jsonrpc": "2.0",
+            "id": 23,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"exposure_status": "exposed"}},
+        }
+        res4 = await async_handle_mcp_payload(mock_hass, req4)
+        data4 = json.loads(res4["result"]["content"][0]["text"])
+        assert len(data4) == 2
+        assert {d["entity_id"] for d in data4} == {
+            "light.living_room_ceiling",
+            "climate.upstairs_thermostat",
+        }
+
+        # 5. Filter exposure_status = 'not_exposed'
+        req5 = {
+            "jsonrpc": "2.0",
+            "id": 24,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"exposure_status": "not_exposed"}},
+        }
+        res5 = await async_handle_mcp_payload(mock_hass, req5)
+        data5 = json.loads(res5["result"]["content"][0]["text"])
+        assert len(data5) == 1
+        assert data5[0]["entity_id"] == "switch.kitchen_fan"
+
+        # 6. Filter search by alias
+        req6 = {
+            "jsonrpc": "2.0",
+            "id": 25,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"search": "bedroom ac"}},
+        }
+        res6 = await async_handle_mcp_payload(mock_hass, req6)
+        data6 = json.loads(res6["result"]["content"][0]["text"])
+        assert len(data6) == 1
+        assert data6[0]["entity_id"] == "climate.upstairs_thermostat"
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_entity_found_and_not_found(mock_hass):
+    """Test get_entity tool when entity is present vs missing."""
+    import json
+    from unittest.mock import patch
+
+    sample_entities = [
+        {
+            "entity_id": "light.living_room_lights",
+            "name": "Living Room Lights",
+            "original_name": "Hue Group",
+            "display_name": "Living Room Lights",
+            "device_class": "",
+            "platform": "hue",
+            "should_expose": True,
+            "yaml_exposed": True,
+            "area": "Living Room",
+            "floor": "Ground Floor",
+            "domain": "light",
+            "aliases": ["overhead"],
+            "in_group": True,
+            "unavailable": False,
+        }
+    ]
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_fetch_entities_data",
+        return_value=sample_entities,
+    ):
+        # Found
+        req_found = {
+            "jsonrpc": "2.0",
+            "id": 30,
+            "method": "tools/call",
+            "params": {
+                "name": "get_entity",
+                "arguments": {"entity_id": "light.living_room_lights"},
+            },
+        }
+        res_found = await async_handle_mcp_payload(mock_hass, req_found)
+        assert res_found["jsonrpc"] == "2.0"
+        assert res_found["id"] == 30
+        assert not res_found["result"].get("isError", False)
+        ent = json.loads(res_found["result"]["content"][0]["text"])
+        assert ent["entity_id"] == "light.living_room_lights"
+
+        # Not found
+        req_not_found = {
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "get_entity",
+                "arguments": {"entity_id": "light.non_existent"},
+            },
+        }
+        res_not_found = await async_handle_mcp_payload(mock_hass, req_not_found)
+        assert res_not_found["jsonrpc"] == "2.0"
+        assert res_not_found["id"] == 31
+        assert res_not_found["result"].get("isError") is True
+        assert "not found" in res_not_found["result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_google_assistant_status_fields(mock_hass):
+    """Test get_google_assistant_status returns expected fields."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mock_store = MagicMock()
+    mock_store.google_settings = {
+        "project_id": "my-google-project",
+        "service_account": {"client_email": "test@example.com", "private_key": "-----BEGIN KEY-----"},
+        "report_state": True,
+    }
+    mock_store.synced_entities = {"light.one": {}, "light.two": {}}
+    mock_store.blocklist = ["^camera\\."]
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_get_store",
+        AsyncMock(return_value=mock_store),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_fetch_entities_data",
+        AsyncMock(return_value=[{"entity_id": "light.one", "should_expose": True, "yaml_exposed": True}]),
+    ):
+        req = {
+            "jsonrpc": "2.0",
+            "id": 40,
+            "method": "tools/call",
+            "params": {"name": "get_google_assistant_status", "arguments": {}},
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        assert res["jsonrpc"] == "2.0"
+        assert not res["result"].get("isError", False)
+        status = json.loads(res["result"]["content"][0]["text"])
+        assert status["project_id"] == "my-google-project"
+        assert status["service_account_configured"] is True
+        assert status["report_state"] is True
+        assert status["exposed_count"] == 1
+        assert "blocklisted_count" in status
+        assert "last_sync_timestamp" in status
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_list_entities_blocked_exposure_status(mock_hass):
+    """Test list_entities returns blocked entities when exposure_status='blocked'."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    mock_entry = MagicMock()
+    mock_entry.entity_id = "sensor.blocked_battery"
+    mock_entry.name = "Blocked Battery"
+    mock_entry.original_name = "Battery"
+    mock_entry.disabled_by = None
+    mock_entry.hidden_by = None
+    mock_entry.device_id = None
+    mock_entry.area_id = None
+    mock_entry.aliases = []
+
+    mock_ent_reg = MagicMock()
+    mock_ent_reg.entities = {"sensor.blocked_battery": mock_entry}
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_load_blocklist",
+        return_value=[r".*_battery$"],
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.entity_registry.async_get",
+        return_value=mock_ent_reg,
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.device_registry.async_get",
+        return_value=MagicMock(devices={}),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.area_registry.async_get",
+        return_value=MagicMock(async_list_areas=MagicMock(return_value=[])),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.floor_registry.async_get",
+        return_value=MagicMock(async_list_floors=MagicMock(return_value=[])),
+    ):
+        req = {
+            "jsonrpc": "2.0",
+            "id": 50,
+            "method": "tools/call",
+            "params": {"name": "list_entities", "arguments": {"exposure_status": "blocked"}},
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        assert res["jsonrpc"] == "2.0"
+        data = json.loads(res["result"]["content"][0]["text"])
+        assert len(data) == 1
+        assert data[0]["entity_id"] == "sensor.blocked_battery"
+        assert data[0]["blocklisted"] is True
+        assert data[0]["blocklist_rule"] == r".*_battery$"
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_entity_blocked(mock_hass):
+    """Test get_entity returns entity details even if blocked by blocklist."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    mock_entry = MagicMock()
+    mock_entry.entity_id = "sensor.blocked_battery"
+    mock_entry.name = "Blocked Battery"
+    mock_entry.original_name = "Battery"
+    mock_entry.disabled_by = None
+    mock_entry.hidden_by = None
+    mock_entry.device_id = None
+    mock_entry.area_id = None
+    mock_entry.aliases = []
+
+    mock_ent_reg = MagicMock()
+    mock_ent_reg.entities = {"sensor.blocked_battery": mock_entry}
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_fetch_entities_data",
+        return_value=[],
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_load_blocklist",
+        return_value=[r".*_battery$"],
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.entity_registry.async_get",
+        return_value=mock_ent_reg,
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.device_registry.async_get",
+        return_value=MagicMock(devices={}),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.area_registry.async_get",
+        return_value=MagicMock(async_list_areas=MagicMock(return_value=[])),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.floor_registry.async_get",
+        return_value=MagicMock(async_list_floors=MagicMock(return_value=[])),
+    ):
+        req = {
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "tools/call",
+            "params": {
+                "name": "get_entity",
+                "arguments": {"entity_id": "sensor.blocked_battery"},
+            },
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        assert res["jsonrpc"] == "2.0"
+        assert not res["result"].get("isError", False)
+        ent = json.loads(res["result"]["content"][0]["text"])
+        assert ent["entity_id"] == "sensor.blocked_battery"
+        assert ent["blocklisted"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_unknown_tool(mock_hass):
+    """Test calling an unknown tool returns isError=True."""
+    req = {
+        "jsonrpc": "2.0",
+        "id": 52,
+        "method": "tools/call",
+        "params": {"name": "unsupported_tool", "arguments": {}},
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert res["id"] == 52
+    assert res["result"].get("isError") is True
+    assert "not implemented or unknown" in res["result"]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_invalid_arguments_type(mock_hass):
+    """Test tools/call with invalid arguments type returns error -32602."""
+    req = {
+        "jsonrpc": "2.0",
+        "id": 53,
+        "method": "tools/call",
+        "params": {"name": "list_entities", "arguments": "not-a-dict"},
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert "error" in res
+    assert res["error"]["code"] == -32602
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_entity_missing_id(mock_hass):
+    """Test get_entity with missing entity_id returns tool error."""
+    req = {
+        "jsonrpc": "2.0",
+        "id": 54,
+        "method": "tools/call",
+        "params": {"name": "get_entity", "arguments": {}},
+    }
+    res = await async_handle_mcp_payload(mock_hass, req)
+    assert res["jsonrpc"] == "2.0"
+    assert res["result"].get("isError") is True
+    assert "Missing required argument" in res["result"]["content"][0]["text"]
+
+
+
