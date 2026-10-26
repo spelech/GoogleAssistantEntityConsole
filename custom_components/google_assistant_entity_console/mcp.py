@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SERVER_NAME = "google-assistant-entity-console"
-SERVER_VERSION = "3.1.0"
+SERVER_VERSION = "3.1.1"
 TOOL_CACHE_TTL_MS = 300000
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -257,8 +257,12 @@ def _get_blocked_entities(
         if getattr(f, "floor_id", getattr(f, "id", None))
     }
 
-    devices_dict = getattr(dev_reg, "devices", {})
-    device_vals = devices_dict.values() if isinstance(devices_dict, dict) else []
+    devices_collection = getattr(dev_reg, "devices", ())
+    device_vals = (
+        devices_collection.values()
+        if isinstance(devices_collection, dict)
+        else devices_collection
+    )
     device_area_map = {d.id: d.area_id for d in device_vals if hasattr(d, "id")}
     device_name_map = {
         d.id: getattr(d, "name_by_user", None) or getattr(d, "name", "")

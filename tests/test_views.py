@@ -1707,3 +1707,83 @@ async def test_migrate_yaml_view_post(mock_hass, tmp_path):
         assert data["project_id"] == "migrated-proj"
 
 
+@pytest.mark.anyio
+async def test_fetch_entities_iterates_device_registry_view_without_values(mock_hass):
+    """Verifies HA 2027.9+ compatibility where dev_reg.devices is iterated directly without calling .values()."""
+
+    class NonMappingDevicesView:
+        def __init__(self, items):
+            self._items = items
+
+        def __iter__(self):
+            return iter(self._items)
+
+        def values(self):
+            raise AssertionError("dev_reg.devices.values() is deprecated in HA 2027.9+")
+
+    mock_dev = MagicMock()
+    mock_dev.id = "dev_2027"
+    mock_dev.area_id = "area_office"
+    mock_dev.name_by_user = "Office Desk Lamp"
+    mock_dev.name = "Desk Lamp"
+
+    mock_dev_reg = MagicMock()
+    mock_dev_reg.devices = NonMappingDevicesView([mock_dev])
+
+    mock_entry = MagicMock()
+    mock_entry.entity_id = "light.office_desk"
+    mock_entry.disabled_by = None
+    mock_entry.hidden_by = None
+    mock_entry.device_id = "dev_2027"
+    mock_entry.device_class = None
+    mock_entry.original_device_class = None
+    mock_entry.area_id = None
+    mock_entry.name = None
+    mock_entry.original_name = "Desk"
+    mock_entry.aliases = []
+    mock_entry.options = {}
+    mock_entry.platform = "hue"
+
+    mock_ent_reg = MagicMock()
+    mock_ent_reg.entities = {"light.office_desk": mock_entry}
+
+    mock_area = MagicMock()
+    mock_area.id = "area_office"
+    mock_area.name = "Office"
+    mock_area.floor_id = None
+    mock_area_reg = MagicMock()
+    mock_area_reg.async_list_areas.return_value = [mock_area]
+
+    with (
+        patch(
+            "custom_components.google_assistant_entity_console.views.entity_registry.async_get",
+            return_value=mock_ent_reg,
+        ),
+        patch(
+            "custom_components.google_assistant_entity_console.views.device_registry.async_get",
+            return_value=mock_dev_reg,
+        ),
+        patch(
+            "custom_components.google_assistant_entity_console.views.area_registry.async_get",
+            return_value=mock_area_reg,
+        ),
+        patch(
+            "custom_components.google_assistant_entity_console.views.floor_registry.async_get",
+            return_value=MagicMock(async_list_floors=MagicMock(return_value=[])),
+        ),
+        patch(
+            "custom_components.google_assistant_entity_console.views.get_current_yaml_filename",
+            return_value="dummy.yaml",
+        ),
+        patch(
+            "custom_components.google_assistant_entity_console.views.load_yaml_exposed_entities",
+            return_value={},
+        ),
+    ):
+        entities = await async_fetch_entities_data(mock_hass)
+        assert len(entities) == 1
+        assert entities[0]["area"] == "Office"
+        assert entities[0]["display_name"] == "Office Desk Lamp"
+
+
+

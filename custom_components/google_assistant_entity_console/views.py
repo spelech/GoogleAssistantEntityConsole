@@ -243,10 +243,16 @@ async def async_fetch_entities_data(hass: HomeAssistant):
         if store.synced_entities:
             yaml_exposed = store.synced_entities
 
-    # Build device mappings
+    # Build device mappings (iterate directly over dev_reg.devices for HA 2027.9+ compatibility,
+    # with fallback to .values() when dev_reg.devices is a plain dict in unit tests)
     device_area_map = {}
     device_name_map = {}
-    for device in dev_reg.devices.values():
+    devices_iter = (
+        dev_reg.devices.values()
+        if isinstance(dev_reg.devices, dict)
+        else dev_reg.devices
+    )
+    for device in devices_iter:
         device_area_map[device.id] = device.area_id
         device_name_map[device.id] = device.name_by_user or device.name
 
