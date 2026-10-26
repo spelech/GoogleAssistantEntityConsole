@@ -1,4 +1,4 @@
-# Google Assistant Entity Console Architecture (v3.1.0)
+# Google Assistant Entity Console Architecture (v3.1.1)
 
 This document provides a technical overview of the **Google Assistant Entity Console** Home Assistant custom component architecture.
 
@@ -57,7 +57,7 @@ The integration entrypoint is defined in [`custom_components/google_assistant_en
 
 ### Setup Sequence:
 1. **Async Setup Entry** (`async_setup_entry`):
-   - Reads integration manifest version (`3.1.0`).
+   - Reads integration manifest version (`3.1.1`).
    - Initializes `ConsoleStore` via `async_get_store(hass)` to load or migrate credentials, blocklists, and sync state from `.storage/google_assistant_entity_console`.
    - Initializes `GoogleAssistantRuntimeManager` via `async_get_runtime(hass)` and hooks in-memory `GoogleConfig._config["entity_config"]`.
    - Registers static HTTP paths (`/google_assistant_entity_console/static`) pointing to the component's `static/` directory.
@@ -92,7 +92,7 @@ Starting in v3.1.0, Google Assistant Entity Console provides a native MCP server
 - **Transport & Lifecycle**:
   - [`McpStreamableView`](file:///home/steve/Repos/GoogleAssistantEntityConsole/custom_components/google_assistant_entity_console/views.py) listens on `POST /api/google_assistant_entity_console/mcp` requiring standard Home Assistant Bearer token authentication (`requires_auth = True`).
   - Supports stateless JSON-RPC 2.0 request/response cycles as well as `Accept: text/event-stream` SSE streams.
-  - Implements the MCP initialization handshake (`initialize` returning server capabilities, protocol version `2026-07-28`, and server metadata `google-assistant-entity-console` v3.1.0; `notifications/initialized`).
+  - Implements the MCP initialization handshake (`initialize` returning server capabilities, protocol version `2026-07-28`, and server metadata `google-assistant-entity-console` v3.1.1; `notifications/initialized`).
   - Implements JSON-RPC ping (`ping`) and notification handling (`notifications/*` returning HTTP 204 No Content).
   - Validates protocol headers and includes `Mcp-Protocol-Version: 2026-07-28` in all HTTP responses.
 - **Tool Registry (`tools/list` & `tools/call`)**:
