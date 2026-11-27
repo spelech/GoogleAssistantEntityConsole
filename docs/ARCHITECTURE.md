@@ -1,4 +1,4 @@
-# Google Assistant Entity Console Architecture (v3.1.1)
+# Google Assistant Entity Console Architecture (v3.2.0)
 
 This document provides a technical overview of the **Google Assistant Entity Console** Home Assistant custom component architecture.
 
@@ -57,12 +57,13 @@ The integration entrypoint is defined in [`custom_components/google_assistant_en
 
 ### Setup Sequence:
 1. **Async Setup Entry** (`async_setup_entry`):
-   - Reads integration manifest version (`3.1.1`).
+   - Reads integration manifest version (`3.2.0`).
    - Initializes `ConsoleStore` via `async_get_store(hass)` to load or migrate credentials, blocklists, and sync state from `.storage/google_assistant_entity_console`.
    - Initializes `GoogleAssistantRuntimeManager` via `async_get_runtime(hass)` and hooks in-memory `GoogleConfig._config["entity_config"]`.
    - Registers static HTTP paths (`/google_assistant_entity_console/static`) pointing to the component's `static/` directory.
    - Registers all 16 backend API HTTP views on `hass.http` (including REST views and `McpStreamableView`).
-   - Registers the custom sidebar panel (`async_register_panel`) pointing to `panel.js`.
+   - Removes any prior panel and registers the custom sidebar panel (`async_register_built_in_panel`) pointing to `panel.js`, unless `hide_sidebar` is enabled in the config entry options (MCP-only mode).
+   - Registers a config entry update listener so toggling `hide_sidebar` in integration options reloads the entry immediately without a restart.
 2. **Unload Entry** (`async_unload_entry`):
    - Removes the sidebar panel (`async_remove_panel`).
 
@@ -92,7 +93,7 @@ Starting in v3.1.0, Google Assistant Entity Console provides a native MCP server
 - **Transport & Lifecycle**:
   - [`McpStreamableView`](file:///home/steve/Repos/GoogleAssistantEntityConsole/custom_components/google_assistant_entity_console/views.py) listens on `POST /api/google_assistant_entity_console/mcp` requiring standard Home Assistant Bearer token authentication (`requires_auth = True`).
   - Supports stateless JSON-RPC 2.0 request/response cycles as well as `Accept: text/event-stream` SSE streams.
-  - Implements the MCP initialization handshake (`initialize` returning server capabilities, protocol version `2026-07-28`, and server metadata `google-assistant-entity-console` v3.1.1; `notifications/initialized`).
+  - Implements the MCP initialization handshake (`initialize` returning server capabilities, protocol version `2026-07-28`, and server metadata `google-assistant-entity-console` v3.2.0; `notifications/initialized`).
   - Implements JSON-RPC ping (`ping`) and notification handling (`notifications/*` returning HTTP 204 No Content).
   - Validates protocol headers and includes `Mcp-Protocol-Version: 2026-07-28` in all HTTP responses.
 - **Tool Registry (`tools/list` & `tools/call`)**:

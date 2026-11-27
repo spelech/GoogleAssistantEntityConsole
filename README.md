@@ -97,6 +97,7 @@ Once installed and Home Assistant has restarted:
 2. Click **Add Integration** in the bottom-right corner.
 3. Search for **Google Assistant Entity Console** and select it.
 4. Open the **Google Sync** panel in your sidebar and click **Settings** to verify or configure your Google Cloud `project_id` and `SERVICE_ACCOUNT.json` credentials directly in `.storage` (or click **Migrate from YAML** to import and comment out any legacy `google_assistant:` block in `configuration.yaml`).
+5. *(Optional — MCP-only mode)* To hide the **Google Sync** panel from the Home Assistant sidebar and manage exclusively through the MCP server, go to **Settings** > **Devices & Services** > **Google Assistant Entity Console** > **Configure** and enable **Hide sidebar panel (MCP-only mode)**. You can toggle it back off at any time from the same options dialog without restarting Home Assistant.
 
 ---
 

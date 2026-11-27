@@ -100,6 +100,16 @@ except ImportError:
             self.domain = domain
             self.data = data or {}
             self.options = options or {}
+            self._unload_callbacks = []
+            self._update_listeners = []
+
+        def async_on_unload(self, func):
+            self._unload_callbacks.append(func)
+            return func
+
+        def add_update_listener(self, listener):
+            self._update_listeners.append(listener)
+            return lambda: self._update_listeners.remove(listener)
 
     class ConfigFlow:
         def __init_subclass__(cls, domain: str | None = None, **kwargs) -> None:
@@ -112,17 +122,47 @@ except ImportError:
         def async_abort(self, reason: str):
             return {"type": "abort", "reason": reason}
 
-        def async_create_entry(self, title: str, data: dict):
-            return {"type": "create_entry", "title": title, "data": data}
+        def async_create_entry(
+            self,
+            title: str,
+            data: dict,
+            options: dict | None = None,
+        ):
+            res = {"type": "create_entry", "title": title, "data": data}
+            if options is not None:
+                res["options"] = options
+            return res
 
         def async_show_form(
             self,
             step_id: str,
+            data_schema=None,
             user_input: dict | None = None,
             errors: dict | None = None,
             description_placeholders: dict | None = None,
         ):
-            return {"type": "form", "step_id": step_id, "errors": errors}
+            res = {"type": "form", "step_id": step_id, "errors": errors}
+            if data_schema is not None:
+                res["data_schema"] = data_schema
+            return res
+
+    class OptionsFlow:
+        config_entry: ConfigEntry | None = None
+
+        def async_show_form(
+            self,
+            step_id: str,
+            data_schema=None,
+            errors: dict | None = None,
+            description_placeholders: dict | None = None,
+        ):
+            res = {"type": "form", "step_id": step_id, "errors": errors}
+            if data_schema is not None:
+                res["data_schema"] = data_schema
+            return res
+
+        def async_create_entry(self, title: str, data: dict):
+            return {"type": "create_entry", "title": title, "data": data}
 
     class ConfigEntryState:
         LOADED = "loaded"
@@ -131,6 +171,7 @@ except ImportError:
 
     config_entries.ConfigEntry = ConfigEntry
     config_entries.ConfigFlow = ConfigFlow
+    config_entries.OptionsFlow = OptionsFlow
     config_entries.ConfigEntryState = ConfigEntryState
     config_entries.SOURCE_IMPORT = "import"
 

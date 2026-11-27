@@ -8,7 +8,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, entry_hide_sidebar
 from .runtime import async_get_runtime
 from .store import async_get_store
 from .views import (
@@ -94,26 +94,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.http.register_view(AIGenerateSingleEntityNicknameView())
     hass.http.register_view(McpStreamableView())
 
-    # 4. Register Sidebar Panel
+    # 4. Register Sidebar Panel (skipped in MCP-only hide_sidebar mode)
     async_remove_panel(hass, DOMAIN, warn_if_unknown=False)
 
-    async_register_built_in_panel(
-        hass=hass,
-        component_name="custom",
-        sidebar_title="Google Sync",
-        sidebar_icon="mdi:google-assistant",
-        frontend_url_path=DOMAIN,
-        require_admin=False,
-        config={
-            "_panel_custom": {
-                "name": "google-assistant-entity-console-panel",
-                "js_url": f"/google_assistant_entity_console/static/panel.js?v={version}",
+    if not entry_hide_sidebar(entry):
+        async_register_built_in_panel(
+            hass=hass,
+            component_name="custom",
+            sidebar_title="Google Sync",
+            sidebar_icon="mdi:google-assistant",
+            frontend_url_path=DOMAIN,
+            require_admin=False,
+            config={
+                "_panel_custom": {
+                    "name": "google-assistant-entity-console-panel",
+                    "js_url": f"/google_assistant_entity_console/static/panel.js?v={version}",
+                },
+                "version": version,
             },
-            "version": version,
-        },
-    )
+        )
+    else:
+        _LOGGER.info(
+            "Google Sync sidebar panel hidden via config option (MCP-only mode)"
+        )
+
+    if hasattr(entry, "async_on_unload") and hasattr(entry, "add_update_listener"):
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when options are updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
