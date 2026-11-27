@@ -22,7 +22,7 @@ from homeassistant.helpers import (
     floor_registry,
 )
 
-from .const import DOMAIN
+from .const import DOMAIN, entry_hide_sidebar
 from .runtime import async_get_runtime
 from .store import async_get_store
 from .views import (
@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SERVER_NAME = "google-assistant-entity-console"
-SERVER_VERSION = "3.1.1"
+SERVER_VERSION = "3.2.0"
 TOOL_CACHE_TTL_MS = 300000
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -504,6 +504,13 @@ async def _handle_get_google_assistant_status(
     )
     last_sync = domain_data.get("last_sync_timestamp") or gs.get("last_sync_timestamp")
 
+    sidebar_hidden = False
+    config_entries_mgr = getattr(hass, "config_entries", None)
+    if config_entries_mgr and hasattr(config_entries_mgr, "async_entries"):
+        entries = config_entries_mgr.async_entries(DOMAIN)
+        if isinstance(entries, list):
+            sidebar_hidden = any(entry_hide_sidebar(e) for e in entries)
+
     status = {
         "project_id": project_id,
         "service_account_configured": sa_configured,
@@ -511,6 +518,7 @@ async def _handle_get_google_assistant_status(
         "exposed_count": exposed_count,
         "blocklisted_count": blocklisted_count,
         "last_sync_timestamp": last_sync,
+        "sidebar_hidden": sidebar_hidden,
     }
 
     return {

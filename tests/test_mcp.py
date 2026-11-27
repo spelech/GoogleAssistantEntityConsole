@@ -407,6 +407,43 @@ async def test_mcp_call_get_google_assistant_status_fields(mock_hass):
         assert status["exposed_count"] == 1
         assert "blocklisted_count" in status
         assert "last_sync_timestamp" in status
+        assert status["sidebar_hidden"] is False
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_get_google_assistant_status_sidebar_hidden(mock_hass):
+    """Test get_google_assistant_status reports sidebar_hidden=True in MCP-only mode."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from homeassistant.config_entries import ConfigEntry
+
+    mock_store = MagicMock()
+    mock_store.google_settings = {"project_id": "my-google-project", "report_state": True}
+    mock_store.synced_entities = {}
+    mock_store.blocklist = []
+
+    mock_hass.config_entries = MagicMock()
+    mock_hass.config_entries.async_entries = MagicMock(
+        return_value=[ConfigEntry(options={"hide_sidebar": True})]
+    )
+
+    with patch(
+        "custom_components.google_assistant_entity_console.mcp.async_get_store",
+        AsyncMock(return_value=mock_store),
+    ), patch(
+        "custom_components.google_assistant_entity_console.mcp.async_fetch_entities_data",
+        AsyncMock(return_value=[]),
+    ):
+        req = {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {"name": "get_google_assistant_status", "arguments": {}},
+        }
+        res = await async_handle_mcp_payload(mock_hass, req)
+        status = json.loads(res["result"]["content"][0]["text"])
+        assert status["sidebar_hidden"] is True
 
 
 @pytest.mark.asyncio

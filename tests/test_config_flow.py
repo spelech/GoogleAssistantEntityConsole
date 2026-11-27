@@ -12,8 +12,14 @@ from custom_components.google_assistant_entity_console import (
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.google_assistant_entity_console.config_flow import ConfigFlow
-from custom_components.google_assistant_entity_console.const import DOMAIN
+from custom_components.google_assistant_entity_console.config_flow import (
+    ConfigFlow,
+    OptionsFlowHandler,
+)
+from custom_components.google_assistant_entity_console.const import (
+    CONF_HIDE_SIDEBAR,
+    DOMAIN,
+)
 from custom_components.google_assistant_entity_console.views import (
     AIGenerateNicknamesView,
     AIGenerateSingleEntityNicknameView,
@@ -88,6 +94,54 @@ async def test_config_flow_user_step_creates_entry_with_extra_input():
     assert result["type"] == "create_entry"
     assert result["title"] == "Google Sync"
     assert result["data"] == {}
+
+
+@pytest.mark.anyio
+async def test_config_flow_user_step_with_hide_sidebar_true():
+    """Test user step stores hide_sidebar=True in options when selected."""
+    flow = ConfigFlow()
+    flow._async_current_entries = MagicMock(return_value=[])
+
+    result = await flow.async_step_user(user_input={CONF_HIDE_SIDEBAR: True})
+    assert result["type"] == "create_entry"
+    assert result["title"] == "Google Sync"
+    assert result["data"] == {}
+    assert result["options"] == {CONF_HIDE_SIDEBAR: True}
+
+
+@pytest.mark.anyio
+async def test_config_flow_user_step_with_hide_sidebar_false():
+    """Test user step stores hide_sidebar=False in options when unchecked."""
+    flow = ConfigFlow()
+    flow._async_current_entries = MagicMock(return_value=[])
+
+    result = await flow.async_step_user(user_input={CONF_HIDE_SIDEBAR: False})
+    assert result["type"] == "create_entry"
+    assert result["title"] == "Google Sync"
+    assert result["data"] == {}
+    assert result["options"] == {CONF_HIDE_SIDEBAR: False}
+
+
+@pytest.mark.anyio
+async def test_options_flow_initial_form_and_save():
+    """Test OptionsFlowHandler displays current hide_sidebar setting and saves updates."""
+    from homeassistant.config_entries import ConfigEntry
+
+    entry = ConfigEntry(options={CONF_HIDE_SIDEBAR: True, "other_option": "keep"})
+    options_flow = ConfigFlow.async_get_options_flow(entry)
+    assert isinstance(options_flow, OptionsFlowHandler)
+    options_flow.config_entry = entry
+
+    form_result = await options_flow.async_step_init()
+    assert form_result["type"] == "form"
+    assert form_result["step_id"] == "init"
+    assert CONF_HIDE_SIDEBAR in form_result["data_schema"]
+
+    save_result = await options_flow.async_step_init(
+        user_input={CONF_HIDE_SIDEBAR: False}
+    )
+    assert save_result["type"] == "create_entry"
+    assert save_result["data"] == {CONF_HIDE_SIDEBAR: False, "other_option": "keep"}
 
 
 @pytest.mark.anyio
@@ -256,6 +310,47 @@ async def test_async_setup_entry_panel_lifecycle_order(lifecycle_hass):
 # ---------------------------------------------------------------------------
 # Integration Unload Lifecycle Tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_async_setup_entry_hide_sidebar_mcp_only_mode(lifecycle_hass):
+    """Test async_setup_entry skips sidebar panel registration when hide_sidebar is True."""
+    from homeassistant.config_entries import ConfigEntry
+
+    entry = ConfigEntry(entry_id="mcp_only_entry", options={CONF_HIDE_SIDEBAR: True})
+    lifecycle_hass.config_entries = MagicMock()
+    lifecycle_hass.config_entries.async_reload = AsyncMock()
+
+    with patch(
+        "custom_components.google_assistant_entity_console.async_remove_panel"
+    ) as mock_remove_panel, patch(
+        "custom_components.google_assistant_entity_console.async_register_built_in_panel"
+    ) as mock_register_panel:
+        result = await async_setup_entry(lifecycle_hass, entry)
+        assert result is True
+
+        # Views (including MCP) and static paths still register in MCP-only mode
+        lifecycle_hass.http.async_register_static_paths.assert_awaited_once()
+        assert lifecycle_hass.http.register_view.call_count == 16
+        registered_classes = [
+            call.args[0].__class__
+            for call in lifecycle_hass.http.register_view.call_args_list
+        ]
+        assert McpStreamableView in registered_classes
+
+        # Existing panel is removed, and new panel is NOT registered
+        mock_remove_panel.assert_called_once_with(
+            lifecycle_hass, DOMAIN, warn_if_unknown=False
+        )
+        mock_register_panel.assert_not_called()
+
+        # Update listener triggers reload on options change
+        assert len(entry._update_listeners) == 1
+        assert len(entry._unload_callbacks) == 1
+        await entry._update_listeners[0](lifecycle_hass, entry)
+        lifecycle_hass.config_entries.async_reload.assert_awaited_once_with(
+            "mcp_only_entry"
+        )
 
 
 @pytest.mark.anyio

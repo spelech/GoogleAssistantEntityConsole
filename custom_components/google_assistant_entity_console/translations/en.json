@@ -3,11 +3,31 @@
     "step": {
       "user": {
         "title": "Google Assistant Entity Console",
-        "description": "Do you want to configure the Google Assistant Entity Console?"
+        "description": "Configure the Google Assistant Entity Console integration.",
+        "data": {
+          "hide_sidebar": "Hide sidebar panel (MCP-only mode)"
+        },
+        "data_description": {
+          "hide_sidebar": "Do not register the Google Sync panel in the Home Assistant sidebar. Manage entities and sync via the MCP server; you can change this anytime in integration options."
+        }
       }
     },
     "abort": {
       "single_instance_allowed": "Only a single instance of this integration is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Google Assistant Entity Console Options",
+        "description": "Configure integration display and management mode.",
+        "data": {
+          "hide_sidebar": "Hide sidebar panel (MCP-only mode)"
+        },
+        "data_description": {
+          "hide_sidebar": "Hide the Google Sync panel from the Home Assistant sidebar when managing exclusively via the MCP server."
+        }
+      }
     }
   }
 }
